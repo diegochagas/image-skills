@@ -28,7 +28,7 @@ Neither script recurses into sub-folders.
 | "counter-clockwise", "the other way", "-90", "270" | `rotate_images.py <folder> 270` |
 | "upside down", "180" | `rotate_images.py <folder> 180` |
 | "stretch / resize all PNGs to WxH", "exactly 1920 by 1080", "fit the screen" | `stretch_pngs.py <folder> <W> <H>` |
-| wants proportional resizing, JPEGs, or a max height rather than exact size | not this skill — `comic-archive` (`images_to_cbr.py --max-height`) or Pillow directly |
+| wants proportional resizing, JPEGs, or a max height rather than exact size | not this skill — `comic-archive` (`images_to_cbz.py --max-height`) or Pillow directly |
 
 The originals are never modified, so a wrong angle costs nothing: run it
 again with the right one. If the user explicitly wants the originals

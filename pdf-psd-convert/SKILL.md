@@ -60,7 +60,7 @@ files keep their ICC profile; RGB profiles are converted to sRGB.
 ```
 
 To pack the resulting image folders into comic archives, hand off to the
-`comic-archive` skill (`images_to_cbr.py` on the folder that contains them).
+`comic-archive` skill (`images_to_cbz.py` on the folder that contains them).
 
 ## Report
 
