@@ -1,6 +1,6 @@
 ---
 name: comic-archive
-description: Pack a folder of page images into a .cbr/.cbz comic archive, or unpack .cbr/.cbz/.zip archives back into image folders (optionally just the cover). Use when the user asks to "make a cbr/cbz", "pack these pages", "turn this folder into a comic file", "extract/unpack this cbr", "get the covers out of these archives", or mentions comic-reader files. Picks the right script and flags (JPEG conversion, max height, quality, overwrite, dry-run, first-only) from what the user says.
+description: Pack a folder of page images into a .cbz comic archive (never .cbr), convert existing .cbr files to .cbz, or unpack .cbr/.cbz/.zip archives back into image folders (optionally just the cover). Use when the user asks to "make a cbr/cbz", "pack these pages", "turn this folder into a comic file", "extract/unpack this cbr", "get the covers out of these archives", or mentions comic-reader files. Picks the right script and flags (JPEG conversion, max height, quality, overwrite, dry-run, first-only) from what the user says.
 ---
 
 # comic-archive — pack / unpack comic archives
@@ -16,7 +16,8 @@ The source folder is never written to.
 
 | Script | Direction | Needs |
 | --- | --- | --- |
-| `images_to_cbr.py` | folder(s) of images → `.cbr` (a ZIP renamed for comic readers) | stdlib; Pillow only for `--convert-jpeg` / `--max-height` |
+| `images_to_cbz.py` | folder(s) of images → `.cbz` (a ZIP; `.cbz` is the only format written) | stdlib; Pillow only for `--convert-jpeg` / `--max-height` |
+| `cbr_to_cbz.py` | existing `.cbr` files (a folder, recursive) → `.cbz` next to them | stdlib; `unrar` or `7z` for RAR-based ones |
 | `cbr_to_images.py` | `.cbr` / `.cbz` / `.zip` → image folders | stdlib for ZIP-based files; `unrar`, `rar` or `7z` on PATH for RAR-based `.cbr` |
 
 ## Choosing the script and flags
@@ -24,23 +25,28 @@ The source folder is never written to.
 Decide from the request, then run once. Ask only when the target path is
 missing.
 
-**Packing** (`images_to_cbr.py <folder> [flags]`):
+**Packing** (`images_to_cbz.py <folder> [flags]`):
 
 | The user says... | Flags |
 | --- | --- |
-| "pack / make a cbr / cbz of this folder" | none — images are stored as-is |
-| a folder that contains one sub-folder per chapter/issue | none — each sub-folder becomes its own `.cbr` in `~/Downloads/<folder name>/` |
-| a folder that contains the images directly | none — one `~/Downloads/<folder name>.cbr` |
+| "pack / make a cbz (or "cbr") of this folder" | none — images are stored as-is |
+| a folder that contains one sub-folder per chapter/issue | none — each sub-folder becomes its own `.cbz` in `~/Downloads/<folder name>/` |
+| a folder that contains the images directly | none — one `~/Downloads/<folder name>.cbz` |
 | names a destination folder | `--output <dir>` |
 | "convert to jpg", "smaller file", "the PNGs are huge" | `--convert-jpeg` |
 | "resize", "max height N", "shrink tall pages", "for a tablet / phone" | `--max-height <px>` (outputs JPEG; 2048 for tablets, 2500–3000 to keep detail) |
 | a JPEG quality, "high quality", "compress more" | `--quality <1-100>` (default 90) |
-| "replace / redo / overwrite the existing cbr" | `--overwrite` (otherwise existing `.cbr` files are skipped) |
-| wants a `.cbz` extension | pack, then rename the result: the file is a plain ZIP either way |
+| "replace / redo / overwrite the existing cbz" | `--overwrite` (otherwise existing `.cbz` files are skipped) |
+| asks for a `.cbr` | still writes `.cbz` (readers such as Kavita and Calibre treat both the same; a real `.cbr` is RAR, which needs the proprietary `rar`) |
 
 Supported inputs: `.jpg .jpeg .png .gif .webp .bmp .tiff .tif`. Pages are
 added in sorted filename order — if the names don't sort in reading order
 (`1.jpg, 10.jpg, 2.jpg`), rename them zero-padded first.
+
+**Converting** (`cbr_to_cbz.py <folder> --originals-to <dir> | --keep-originals | --dry-run`): ZIP-based
+`.cbr` files are only renamed after an integrity test; RAR-based ones are repacked
+(stored, same pages, count verified) and the RAR original is moved to
+`--originals-to` with its relative path. Existing `.cbz` targets are never overwritten.
 
 **Unpacking** (`cbr_to_images.py <folder> [flags]`):
 
@@ -59,8 +65,8 @@ find an extractor", tell the user to install `unrar` or `p7zip-full`.
 ## Examples
 
 ```bash
-<repo>/venv/bin/python comic-archive/scripts/images_to_cbr.py "/path/to/comics"                       # ~/Downloads/comics/<sub-folder>.cbr
-<repo>/venv/bin/python comic-archive/scripts/images_to_cbr.py "/path/to/chapter1" --convert-jpeg --max-height 2500
+<repo>/venv/bin/python comic-archive/scripts/images_to_cbz.py "/path/to/comics"                       # ~/Downloads/comics/<sub-folder>.cbz
+<repo>/venv/bin/python comic-archive/scripts/images_to_cbz.py "/path/to/chapter1" --convert-jpeg --max-height 2500
 <repo>/venv/bin/python comic-archive/scripts/cbr_to_images.py "/path/to/comics" --dry-run
 <repo>/venv/bin/python comic-archive/scripts/cbr_to_images.py "/path/to/comics" --first-only         # covers only
 ```

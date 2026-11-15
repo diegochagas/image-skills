@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Flatten a folder of PSD/PSB pages and pack them into .cbr comic archives.
+"""Flatten a folder of PSD/PSB pages and pack them into .cbz comic archives.
 
 Glue over two sibling skills, so their behaviour stays in one place:
   pdf-psd-convert/scripts/psd_to_jpg.py   PSD composite -> JPG
-  comic-archive/scripts/images_to_cbr.py  folder of images -> .cbr
+  comic-archive/scripts/images_to_cbz.py  folder of images -> .cbz
 
 Where the archives go (never next to the PSDs; $COMIC_OUTPUT_DIR replaces
 ~/Downloads, --output <dir> names the exact folder):
-  folder with PSDs directly in it   -> ~/Downloads/<folder>.cbr
-  folder with one sub-folder per chapter -> ~/Downloads/<folder>/<chapter>.cbr
+  folder with PSDs directly in it   -> ~/Downloads/<folder>.cbz
+  folder with one sub-folder per chapter -> ~/Downloads/<folder>/<chapter>.cbz
 
 Example:
-  venv/bin/python psd-to-cbr/scripts/psd_to_cbr.py "/path/to/Cap.11" --max-height 2500
+  venv/bin/python psd-to-cbz/scripts/psd_to_cbz.py "/path/to/Cap.11" --max-height 2500
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ SKILLS_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SKILLS_ROOT / "pdf-psd-convert" / "scripts"))
 sys.path.insert(0, str(SKILLS_ROOT / "comic-archive" / "scripts"))
 
-import images_to_cbr  # noqa: E402
+import images_to_cbz  # noqa: E402
 import psd_to_jpg  # noqa: E402
 
 
@@ -45,14 +45,14 @@ def flatten_pages(source: Path, jpg_root: Path, background: str, show_all_layers
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Flatten PSD pages and pack them into .cbr files.")
+    parser = argparse.ArgumentParser(description="Flatten PSD pages and pack them into .cbz files.")
     parser.add_argument("folder", type=Path, help="Folder of PSDs, or of chapter folders holding PSDs")
-    parser.add_argument("--output", type=Path, default=None, help="Folder for the .cbr file(s) (default: ~/Downloads)")
+    parser.add_argument("--output", type=Path, default=None, help="Folder for the .cbz file(s) (default: ~/Downloads)")
     parser.add_argument("--max-height", type=int, default=None, help="Shrink pages taller than this many pixels")
     parser.add_argument("--quality", type=int, default=90, help="JPEG quality when resizing (default 90)")
     parser.add_argument("--background", default="white", help="Matte colour for transparent areas")
     parser.add_argument("--show-all-layers", action="store_true", help="Recomposite with every layer visible")
-    parser.add_argument("--overwrite", action="store_true", help="Replace an existing .cbr")
+    parser.add_argument("--overwrite", action="store_true", help="Replace an existing .cbz")
     return parser.parse_args()
 
 
@@ -66,7 +66,7 @@ def main() -> int:
         print(f"Error: --quality must be 1-100, got {args.quality}.", file=sys.stderr)
         return 2
 
-    work = Path(tempfile.mkdtemp(prefix="psd-to-cbr-"))
+    work = Path(tempfile.mkdtemp(prefix="psd-to-cbz-"))
     try:
         jpg_root = work / source.name  # the archive is named after this folder
         failed = flatten_pages(source, jpg_root, args.background, args.show_all_layers)
@@ -76,12 +76,12 @@ def main() -> int:
         if not jpg_root.is_dir():
             print(f"No PSD/PSB files found under: {source}")
             return 0
-        options = images_to_cbr.ImageOptions(
+        options = images_to_cbz.ImageOptions(
             convert_jpeg=False, max_height=args.max_height,
             quality=args.quality, overwrite=args.overwrite,
         )
         output = args.output.expanduser() if args.output else None
-        images_to_cbr.process(jpg_root, options, output)
+        images_to_cbz.process(jpg_root, options, output)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return 0
