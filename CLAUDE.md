@@ -28,7 +28,8 @@ as if shot today on an iPhone: Higgsfield, else local ComfyUI),
 vision model in Ollama describes every page under a folder into a named set
 in `~/Downloads/<name> descriptions/`), `find-pages` (searches such a set and returns the
 paths of the pages that show something; the agent verifies the top hits by
-looking at them), `comic-archive`, `pdf-psd-convert`, `image-utils`
+looking at them), `book-cover-kit` (phone photo of a book → flat cover, spine colours,
+ISBN from the barcode; pure OpenCV, used by book-menu), `comic-archive`, `pdf-psd-convert`, `image-utils`
 (CLI wrappers that pick flags from the request). `.claude/skills/` and
 `.agents/skills/` contain symlinks to those folders; the `higgsfield-*`
 entries there are vendored third-party skills (`skills-lock.json`) — never
