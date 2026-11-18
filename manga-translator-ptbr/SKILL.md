@@ -137,6 +137,27 @@ to them, as Diego does). Dry-run first and read the list; rasters stay
 byte-exact, only the changed text layers' geometry is rewritten (their
 cached render is dropped, Photoshop re-renders on open).
 
+## Text stroke (outside outline)
+
+Lettering that sits over art gets a Photoshop Layer Style stroke, position
+Outside: **white text -> black stroke, black text -> white stroke**; small and
+medium text 3 px, big text 6 px (big = font size >= 60 px, `--big-from`).
+Text in any other colour is left alone and listed in the log. It is a layer
+effect, not pixels, so the text stays editable and Diego can change or remove
+the stroke in Photoshop; rasters stay byte-exact and re-running replaces the
+stroke instead of stacking another (idempotent). Run it as the last step
+after the translation and `fit_text_boxes.mjs`:
+
+```bash
+node manga-translator-ptbr/scripts/add_text_stroke.mjs <psd | folder> [--from 063 --to 235] [--only STEM ...] [--small 3] [--big 6] [--big-from 60] [--output DIR | --in-place] [--dry-run]
+```
+
+`--from/--to` take an inclusive page range (a spread such as `072-073` counts
+by its first number); the default output is `~/Downloads/<folder name> stroke/`.
+With `--in-place`, copy the files to a `_backup_...` folder first. Photoshop
+re-renders the strokes on open; GIMP/XCF does not show Layer Style strokes.
+First run: Diego's `~/Downloads/Portuguese`, pages 063-235 (2026-11-18).
+
 ## Division of labor
 
 The scripts below do all the mechanical PSD I/O byte-exactly (no

@@ -91,6 +91,7 @@ edit them.
   boxes whose written text would collide; `build_translated_psd.mjs`,
   `set_text_layers.mjs` and `add_and_fill_text_layers.mjs` call it
   (`--no-fit` skips it), `fit_text_boxes.mjs` applies it to finished PSDs.
+  `add_text_stroke.mjs` adds the outside Layer Style stroke (white text → black, black → white; 3 px, 6 px for font size ≥ 60) to finished PSDs.
 
 - `psd-xcf-convert` splits the work by who can do it: GIMP's own PSD
   loader/exporter carries pixels, groups, masks and modes; ag-psd
