@@ -11,7 +11,7 @@ are left untouched. Each erased region is filled by surroundings:
   - one plain color (white bubble, black box, grey caption, red banner, ...)
                     -> filled with that exact sampled color ("fill")
   - busy (art, screentone, gradients)
-                    -> strokes inpainted from the surrounding pixels ("inpaint")
+                    -> left untouched ("left"): the human erases those by hand
 
 Nothing is left for manual review; restoration of anything worth keeping is
 done by hand from the "Original" layer of the PSD.
@@ -21,7 +21,7 @@ For each page writes into <out_dir>/detect/:
                        this becomes the PSD's "Cleaned" layer
   <stem>_mask.png      union stroke mask of everything that was touched
   <stem>_overlay.jpg   original tinted where strokes were detected
-                       (red = solid color fill, green = inpainted,
+                       (red = solid color fill, orange = over art, left,
                         yellow = detected strokes outside any text block,
                         left untouched)
   <stem>_detect.json   text block boxes + erased component bboxes + method +
@@ -36,9 +36,6 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import inpaint_lama  # noqa: E402  (LaMa "generative fill" for busy surroundings)
-
 MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "comictextdetector.pt.onnx")  # <skill>/models
 SIZE = 1024
 SEG_THRESH = 0.3
@@ -51,9 +48,8 @@ COLOR_TOL = 22         # max per-pixel color distance from the ring's median col
 PLAIN_FRAC = 0.90      # fraction of ring pixels within COLOR_TOL for a solid fill
 TEXTURE_P80 = 10.0     # ...and 80 % of them this close to the median: beyond it the
                        # background is a texture (cloth cover, printed pattern, coarse
-                       # tone), where a solid fill shows as a flat patch -> inpainted.
+                       # tone), where a solid fill shows as a flat patch -> left alone.
                        # Measured: scanned white balloons 2-4, an orange cloth cover 13-17.
-INPAINT_RADIUS = 4     # cv2.inpaint radius (fallback when LaMa model is missing)
 BLK_CONF = 0.4         # min confidence for a text block box
 BLK_IOU = 0.4          # NMS threshold for text block boxes
 BLK_PAD = 8            # px padding around each text block box
@@ -155,7 +151,7 @@ def detect_page(sess, path, out_dir):
 
     n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     cleaned = img.copy()
-    inpaint_mask = np.zeros((h, w), np.uint8)
+    art_tint = np.zeros((h, w), np.uint8)    # strokes over art: left for the human (Diego, 2026-11-17)
     fill_tint = np.zeros((h, w), np.uint8)
     skip_tint = np.zeros((h, w), np.uint8)
     comps = []
@@ -200,22 +196,21 @@ def detect_page(sess, path, out_dir):
             b, g, r = median.round().astype(int).clip(0, 255)
             comp_out["bg_color"] = f"#{r:02x}{g:02x}{b:02x}"
         else:
-            comp_out["method"] = "inpaint"
-            inpaint_mask[y0:y1, x0:x1][sel] = 255
+            # busy surroundings (art, screentone, gradients): NOT erased. The
+            # AI inpainting (LaMa / Qwen) left visible patches, so the human
+            # erases these by hand from the Original layer.
+            comp_out["method"] = "left"
+            art_tint[y0:y1, x0:x1][sel] = 255
         comps.append(comp_out)
 
     del labels
-    if inpaint_mask.any():
-        # busy surroundings: LaMa inpainting (<skill>/models/lama_fp32.onnx) when
-        # available, cv2.inpaint (Telea) otherwise. Solid fills above untouched.
-        cleaned = inpaint_lama.inpaint(cleaned, inpaint_mask, inplace=True)
 
-    cv2.imwrite(os.path.join(out_dir, f"{stem}_mask.png"), fill_tint | inpaint_mask)
+    cv2.imwrite(os.path.join(out_dir, f"{stem}_mask.png"), fill_tint)
     cleaned_path = os.path.join(out_dir, f"{stem}_cleaned.png")
     cv2.imwrite(cleaned_path, cleaned)
 
     overlay = img.copy()
-    for m, tint in ((fill_tint, (0, 0, 255)), (inpaint_mask, (0, 200, 0)),
+    for m, tint in ((fill_tint, (0, 0, 255)), (art_tint, (255, 160, 0)),
                     (skip_tint, (0, 255, 255))):
         if m.any():
             overlay[m > 0] = 0.25 * overlay[m > 0] + 0.75 * np.array(tint)
@@ -225,13 +220,12 @@ def detect_page(sess, path, out_dir):
     out = {"source": os.path.abspath(path), "size": [w, h],
            "text_mask": os.path.join(out_dir, f"{stem}_mask.png"),
            "cleaned": cleaned_path, "text_blocks": blocks,
-           "components": comps, "skipped_non_text": skipped,
-           "inpaint_method": inpaint_lama.method_name()}
+           "components": comps, "skipped_non_text": skipped}
     with open(os.path.join(out_dir, f"{stem}_detect.json"), "w") as f:
         json.dump(out, f, indent=1)
-    print(f"{stem}: {len(blocks)} text blocks, {len(comps)} components erased "
+    print(f"{stem}: {len(blocks)} text blocks, {len(comps)} text components "
           f"({sum(c['method'] == 'fill' for c in comps)} fill, "
-          f"{sum(c['method'] == 'inpaint' for c in comps)} inpaint), "
+          f"{sum(c['method'] == 'left' for c in comps)} over art left as is), "
           f"{skipped} non-text skipped")
 
 

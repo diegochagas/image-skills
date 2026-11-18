@@ -9,22 +9,22 @@ One script does the whole job, for a file or a folder, images (jpg, png,
 tif, webp) or layered PSDs:
 
 ```bash
-<repo>/venv/bin/python split-scans/scripts/split_scans.py <file-or-folder> [--output DIR] [--rtl] [--spread auto|yes|no] [--spreads STEM ...] [--pages auto|1|2] [--gutter inpaint|white|flatten|none] [--seam ai|lama] [--align perspective|none] [--rotate 0|90|-90|180] [--only STEM ...] [--recursive] [--also-images] [--dry-run] [--force]
+<repo>/venv/bin/python split-scans/scripts/split_scans.py <file-or-folder> [--output DIR] [--rtl] [--spread yes|no|auto] [--spreads STEM ...] [--pages auto|1|2] [--gutter none|flatten] [--cut-margin 0.15] [--align perspective|none] [--rotate 0|90|-90|180] [--only STEM ...] [--recursive] [--also-images] [--dry-run] [--force]
 ```
 
 `<repo>` is the image-skills checkout; the script needs the shared `venv`
 (opencv, numpy, pillow) and this skill's `node_modules` (ag-psd + canvas,
 installed by `split-scans/setup.sh`, which the root `setup.sh` runs). The
-gutter core is inpainted with manga-translator-ptbr's LaMa model
-(`manga-translator-ptbr/models/lama_fp32.onnx`, downloaded by that skill's
-`setup.sh`); without it the core is filled white.
+cut margin and gutter handling are described below.
+
+**Since 2026-11-17 a two-page scan is NOT split by default** (`--spread yes`: it stays one file, `082-083.psd`). `--spread no` cuts it into two pages, each keeping `--cut-margin` of the neighbour; `--spread auto` guesses.
 
 ## What one scan becomes
 
 | Input stem | Pages found | Output |
 | --- | --- | --- |
 | `082-083` (two consecutive numbers), `030-31` | two pages | `082.psd` + `083.psd` (second number zero-padded to the first's width) |
-| `082-083` and the drawing runs across the spine (a spread) | two pages, kept together | `082-083.psd`: both halves flattened, aligned, the strip the binding swallowed given back and the fold taken away by the local Qwen-Image-Edit (`spread_seam.py`; LaMa without ComfyUI, `--seam lama` for the old side-by-side join) |
+| `082-083` and the drawing runs across the spine (a spread) | two pages, kept together | `082-083.psd`: both halves flattened and put side by side (no alignment, no fold removal: by hand) |
 | `000`, `264`, `000_spine`, `cover` | one page | `<stem>.psd`; a blank facing page in the scan is dropped (only the page with ink is kept) |
 
 **Which number is which page**: by default the first number is the LEFT
@@ -79,13 +79,14 @@ decision, text layers per page). Existing outputs are skipped unless
    line is the fourth side. Corners -> homography -> upright rectangle
    (perspective, skew and the keystone of a curved book in one warp). Both
    pages of one scan get the same output size.
-4. **Gutter fix** (fixed layers only): the band is divided by its
-   illumination - per column the brightest paper level seen along the page,
-   forced to fall monotonically towards the spine, so paper comes back white
-   and lines stay. Dark art next to the spine keeps a faint shadow (no paper
-   there to measure). The core is inpainted with LaMa (`--gutter inpaint`,
-   default), filled white (`white`), left after flattening (`flatten`) or
-   untouched (`none`).
+4. **Cut margin**: each page of a two-page scan keeps `--cut-margin`
+   (default 0.15 of the page width, about 2.5 cm) of the neighbouring page
+   past the detected cut, so the cut can be adjusted by hand: same
+   homography, bigger output canvas (the right page shifts right by the
+   margin). A spread is not cut and gets no margin. The spine shadow and the
+   fold are NOT erased (the LaMa core fill and the Qwen fold repair were
+   removed on 2026-11-17); `--gutter flatten` only divides the shadow band
+   by its illumination.
 5. **Spread test** (two-page scans): what each page looks like next to the
    spine - its white margin, whether art reaches it, whether a panel border
    runs along it, how the two sides' ink profiles correlate. On its own the
@@ -118,10 +119,10 @@ edges {...} | right ...`.
      looking at the scans (contact sheets + middle crops) - there is no
      reliable automatic test for a picture that keeps its inner margins;
    - a book whose shadow is light and whose middle comes out fine already:
-     `--gutter flatten` (no inpainting).
+     `--gutter flatten`.
 3. **Real run** with the decided flags (`--spread no` for a whole book that
    has no spreads is fine), per-file corrections afterwards with `--only ...
-   --force`. About 30 s per 5104x3504 PSD (two rasters: read, warp, inpaint,
+   --force`. About 30 s per 5104x3504 PSD (two rasters: read, warp,
    write two PSDs), 3 s per JPG.
 4. **Check**: `report.jsonl` has every input (no `error` lines); for PSD
    inputs the text layer counts per page add up to the source's; open a few
@@ -150,8 +151,6 @@ page.
 | Script | Role |
 | --- | --- |
 | `scripts/split_scans.py` | the CLI: inputs, analysis plan, warps, gutter fix, PSD/image outputs, review sheets, report |
-| `scripts/spread_align.py` | spreads: alignment of the two halves - the straight lines that cross the fold, fitted for the right page's rotation, shift and missing width (`fit_lines`), else the edges' grey profiles (shift only); `fold_column` finds the fold in one scan that holds both pages |
-| `scripts/spread_seam.py` | spreads: join of the two halves aligned by `spread_align.py` (the right page turned when needed), the shaded band by each fold given its page's tones back block by block (`even_band`), the model's strip Poisson-blended in (`seamless`), fold selected (gap + washed-out band) and redrawn by the local Qwen model through manga-translator-ptbr's `qwen_fill.py`, up to 3 passes per tile, each on the best result so far; also a CLI for two page images: `spread_seam.py <left> <right> <out.png> [--theta DEG] [--dy N] [--gap N] [--no-ai]` |
 | `scripts/page_geometry.py` | background and paper mask, gutter valley, envelope edge fits, homography, shading map, inner-edge / spread features |
 | `scripts/psd_io.mjs` | `dump` a PSD's layers (rasters as PNG + text objects as JSON) and `build` a PSD from such a spec (ag-psd) |
 | `package.json`, `setup.sh` | ag-psd + canvas for the PSD side |

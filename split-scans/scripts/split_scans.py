@@ -8,7 +8,7 @@ to the page their centre lands on, keeping their fonts and boxes).
 Usage:
   split_scans.py <file-or-folder> [--output DIR] [--rtl] [--spread auto|yes|no] [--spreads STEM ...]
                  [--pages auto|1|2] [--align perspective|rotate|none]
-                 [--gutter inpaint|white|flatten|none] [--seam ai|lama] [--only STEM ...]
+                 [--gutter none|flatten] [--cut-margin 0.15] [--only STEM ...]
                  [--recursive] [--dry-run] [--review-only] [--force]
 
 Naming: a stem with two consecutive numbers (082-083, 030-31) is a scan of
@@ -18,10 +18,14 @@ number (000, 264, 000_spine)
 is one page: the scanner border is cut, the page flattened, and if the scan
 also shows a blank facing page only the page with ink is kept. A two-page
 scan whose artwork continues across the spine (a spread) is kept as ONE
-file (082-083) with the two halves aligned, the strip the binding swallowed
-given back and the fold taken away by the local Qwen-Image-Edit model
-(spread_seam.py; --seam lama for the old side-by-side join), unless
---spread no.
+file (082-083), and since 2026-11-17 EVERY two-page scan stays one file
+(--spread yes is the default; cut and fold are handled by hand). --spread no
+cuts it into two pages, --spread auto guesses.
+
+Cut margin: when a scan is cut into two pages each page keeps --cut-margin
+(default 0.15 of the page width, about 2.5 cm) of the neighbouring page past
+the detected cut, so the cut can be adjusted by hand; the canvas grows by that
+strip. Nothing erases the spine or the fold: that is done by hand.
 
 Output: ALWAYS a layered PSD per page, <--output>/<page>.psd (default
 ~/Downloads/<source folder name> split/, COMIC_OUTPUT_DIR replaces
@@ -37,10 +41,8 @@ the resulting pages) and one JSON line per input in <out>/report.jsonl.
 Inputs are never modified. JPEGs are processed in their displayed (EXIF)
 orientation; --rotate 90|-90|180 turns a scan first.
 
-Gutter: the shadow band is divided by its estimated illumination (paper
-comes back white, lines stay); the band's unrecoverable core is inpainted
-with LaMa (manga-translator-ptbr's model) or, with --gutter white, filled
-white; --gutter flatten skips the core fix, none leaves the shadow.
+Gutter: the spine shadow is left as scanned (--gutter none, default);
+--gutter flatten divides the shadow band by its estimated illumination.
 """
 import argparse
 import json
@@ -66,30 +68,6 @@ PSD_EXT = {".psd", ".psb"}
 NODE = "node"
 PSD_IO = os.path.join(HERE, "psd_io.mjs")
 
-SEAM_MAX_DY = 30     # px the halves of one scan may be out of line vertically
-_inpaint_mod = None
-
-
-def inpaint_core(img, mask, mode):
-    """Rebuild the masked pixels: LaMa when available (mode 'inpaint'), else white."""
-    global _inpaint_mod
-    if mode == "inpaint":
-        if _inpaint_mod is None:
-            sys.path.insert(0, os.path.join(REPO, "manga-translator-ptbr", "scripts"))
-            try:
-                import inpaint_lama
-                _inpaint_mod = inpaint_lama if inpaint_lama.available() else False
-            except Exception as e:  # pragma: no cover
-                print(f"  inpaint unavailable ({e}); filling white", file=sys.stderr)
-                _inpaint_mod = False
-        if _inpaint_mod:
-            bgr = img[..., :3].copy()
-            out = _inpaint_mod.inpaint(bgr, mask)
-            res = img.copy(); res[..., :3] = out
-            return res, "lama"
-    res = img.copy()
-    res[mask > 0, :3] = 255
-    return res, "white"
 
 
 def parse_stem(stem):
@@ -236,43 +214,67 @@ def analyse(img, kind, opts):
     # per page: homography and gutter band / core in page columns
     for p in plan["pages"]:
         Hm = G.homography(p["quad"], p["w"], p["h"])
-        p["H"] = Hm
+        p["H0"], p["w0"] = Hm, p["w"]     # the page exactly at the detected cut
+        add_cut_margin(p, getattr(opts, "cut_margin", 0.0), True)
+        Hm = p["H"]
         p["band"] = None; p["core"] = None; p["spine_x"] = None
         if gutter and gutter["depth"] > 0 and opts.gutter != "none":
             ym = (by0 + by1) / 2
             pts = G.map_points(Hm, [[gutter["band_l"], ym], [gutter["band_r"], ym], [gutter["core_l"], ym], [gutter["core_r"], ym], [gutter["x_mid"], ym]])
             bl, br, cl, cr, sx = [float(v[0]) for v in pts]
             if p["side"] == "left":
-                p["band"] = (int(max(0, bl)), p["w"]); p["core"] = (int(max(0, min(cl, p["w"]))), p["w"]); p["spine_x"] = p["w"]
+                end = p["w0"]
+                p["band"] = (int(max(0, bl)), end); p["core"] = (int(max(0, min(cl, end))), end); p["spine_x"] = end
             elif p["side"] == "right":
-                p["band"] = (0, int(min(p["w"], br))); p["core"] = (0, int(max(0, min(cr, p["w"])))); p["spine_x"] = 0
+                st = p["margin"]
+                p["band"] = (st, int(min(p["w"], br))); p["core"] = (st, int(max(st, min(cr, p["w"])))); p["spine_x"] = st
             else:
                 p["band"] = (int(max(0, bl)), int(min(p["w"], br))); p["core"] = (int(max(0, cl)), int(min(p["w"], cr))); p["spine_x"] = sx
     return plan
 
 
-def fix_gutter(page_bgr, p, paper, gutter_mode, is_art_layer=True):
-    """Flatten the shadow band and rebuild the core of one page raster.
-    Returns (image, core_mask or None, method)."""
+def add_cut_margin(p, fraction, two_page_scan):
+    """Keep `fraction` of the page width past the detected cut, on the side
+    of the gutter, so the cut can be adjusted by hand: the same homography,
+    only the output canvas grows (right page: the page shifts right by the
+    margin). Sets p['H'], p['w'], p['margin']; p['H0']/p['w0'] stay the cut."""
+    p["H"], p["w"], p["margin"] = p["H0"], p["w0"], 0
+    if not two_page_scan or p["side"] not in ("left", "right") or fraction <= 0:
+        return
+    m = int(round(fraction * p["w0"]))
+    p["margin"] = m
+    p["w"] = p["w0"] + m
+    if p["side"] == "right":
+        shift = np.array([[1, 0, m], [0, 1, 0], [0, 0, 1]], np.float64)
+        p["H"] = shift @ p["H0"]
+
+
+def drop_cut_margin(plan):
+    """A spread is not cut: its pages keep no margin."""
+    for p in plan["pages"]:
+        p["H"], p["w"], p["margin"] = p["H0"], p["w0"], 0
+
+
+def fix_gutter(page_bgr, p, paper, gutter_mode):
+    """Flatten the shadow band of one page raster (--gutter flatten); the
+    default leaves the page as scanned. The old core inpainting (LaMa) was
+    removed on 2026-11-17: Diego erases the spine by hand.
+    Returns (image, None, method)."""
     if not p["band"] or gutter_mode == "none":
         return page_bgr, None, "none"
     gray = G.luminance(page_bgr[..., :3])
     x0, x1 = p["band"]
     S = G.shading_map(gray, x0, x1, p["spine_x"], paper)
-    out = G.apply_shading(page_bgr, S)
-    if gutter_mode == "flatten" or not p["core"]:
-        return out, None, "flatten"
-    c0, c1 = p["core"]
-    if c1 - c0 <= 0:
-        return out, None, "flatten"
-    mask = np.zeros(gray.shape, np.uint8)
-    mask[:, max(0, c0 - 2):min(gray.shape[1], c1 + 2)] = 255
-    out, m = inpaint_core(out, mask, gutter_mode)
-    return out, mask, m
+    return G.apply_shading(page_bgr, S), None, "flatten"
 
 
-def warp_page(img, p, border):
-    return G.warp(img, p["H"], p["w"], p["h"], border)
+def warp_page(img, p, border, margin=True):
+    """The page flattened. margin=True also keeps the strip past the cut
+    (p['margin'] px of the neighbouring page) so the cut can be adjusted by
+    hand; margin=False is the page exactly at the detected cut."""
+    if margin:
+        return G.warp(img, p["H"], p["w"], p["h"], border)
+    return G.warp(img, p["H0"], p["w0"], p["h"], border)
 
 
 def join_spread(left, right):
@@ -282,26 +284,6 @@ def join_spread(left, right):
             return a
         out = np.full((h, a.shape[1]) + a.shape[2:], 255, a.dtype); out[:a.shape[0]] = a; return out
     return np.concatenate([pad(left), pad(right)], axis=1)
-
-
-def seam_join(left, right, plan, redraw):
-    """The two halves of a spread as one picture (spread_seam.py): aligned,
-    with the strip the binding swallowed given back; on fixed layers
-    (redraw) the fold is taken away by the local Qwen model. The alignment
-    is found once, on the first layer, so every layer stays registered."""
-    import spread_seam
-    pages = plan["pages"]
-    if "seam" not in plan:
-        found = spread_seam.find_alignment(left, right, max_dy=SEAM_MAX_DY)
-        plan["seam"] = {"dy": found["dy"], "gap": found["gap"], "theta": found["theta"], "align": found["method"]}
-    dy, gap, theta = plan["seam"]["dy"], plan["seam"]["gap"], plan["seam"]["theta"]
-    if not redraw:
-        return spread_seam.join_pages(left, right, dy, gap, (0, 0), theta)[0]
-    core = max(left.shape[1] - pages[0]["core"][0] if pages[0]["core"] else 0,
-               pages[1]["core"][1] if pages[1]["core"] else 0)
-    pic, info = spread_seam.join_spread(left, right, dy, gap, eat=max(spread_seam.EAT, core + 3), theta=theta)
-    plan["seam"]["method"] = info["method"]
-    return pic
 
 
 def decide_spread(plan, warped_gray, opts, stem=""):
@@ -379,8 +361,8 @@ def review_sheet(img, plan, results, out_path, label):
 
 def process_rasters(layers, plan, opts, paper):
     """layers: list of (name, BGRA full-canvas image, fix) - fix=False keeps the
-    gutter as scanned (the Original), fix=True flattens it and rebuilds the
-    core. Returns, per output page, the list of warped images in layer order."""
+    gutter as scanned (the Original), fix=True flattens the shadow band
+    (only with --gutter flatten). Returns, per output page, the list of warped images in layer order."""
     pages = plan["pages"]
     per_page = [[] for _ in pages]
     for name, img, fix in layers:
@@ -394,19 +376,7 @@ def process_rasters(layers, plan, opts, paper):
     if plan["spread"]:
         joined = []
         for li in range(len(layers)):
-            left, right = per_page[0][li], per_page[1][li]
-            if opts.seam == "ai":
-                joined.append(seam_join(left, right, plan, redraw=layers[li][2]))
-                continue
-            j = join_spread(left, right)
-            # rebuild the seam once more as one region across both cores
-            if layers[li][2] and opts.gutter in ("inpaint", "white") and (pages[0]["core"] or pages[1]["core"]):
-                w0 = left.shape[1]
-                c0 = pages[0]["core"][0] if pages[0]["core"] else w0
-                c1 = w0 + (pages[1]["core"][1] if pages[1]["core"] else 0)
-                mask = np.zeros(j.shape[:2], np.uint8); mask[:, max(0, c0 - 3):min(j.shape[1], c1 + 3)] = 255
-                j, _ = inpaint_core(j, mask, opts.gutter)
-            joined.append(j)
+            joined.append(join_spread(per_page[0][li], per_page[1][li]))
         outs = [joined]
     else:
         outs = per_page
@@ -493,10 +463,8 @@ def process_psd(path, plan, out_paths, opts, paper, work, dump):
                 best, bestd, bestpt = i, d, (x, y)
         x, y = bestpt
         if plan["spread"]:
-            seam = plan.get("seam") or {"dy": 0, "gap": 0}     # rows/columns seam_join cut or added
             if best == 1:
-                x += pages[0]["w"] + seam["gap"]
-            y -= max(0, -seam["dy"]) if best == 1 else max(0, seam["dy"])
+                x += pages[0]["w"]
             best = 0
         dx, dy = x - cx, y - cy
         # a box that straddled the gutter lands partly off its page: slide it in
@@ -567,14 +535,16 @@ def main():
     ap.add_argument("src")
     ap.add_argument("--output", "-o")
     ap.add_argument("--rtl", action="store_true", help="first number of NNN-MMM is the RIGHT page (manga reading order)")
-    ap.add_argument("--spread", choices=["auto", "yes", "no"], default="auto")
+    ap.add_argument("--spread", choices=["auto", "yes", "no"], default="yes",
+                    help="yes (default): a two-page scan is NOT split, it stays one file; no: cut it into two pages (with --cut-margin); auto: guess")
     ap.add_argument("--spreads", nargs="*", metavar="STEM", help="stems (e.g. 016-017) whose picture runs across both pages: kept as ONE file")
     ap.add_argument("--pages", choices=["auto", "1", "2"], default="auto")
     ap.add_argument("--align", choices=["perspective", "none"], default="perspective")
-    ap.add_argument("--gutter", choices=["inpaint", "white", "flatten", "none"], default="inpaint")
-    ap.add_argument("--seam", choices=["ai", "lama"], default="ai",
-                    help="spreads: ai = halves aligned, missing strip given back, fold removed by the local Qwen model "
-                         "(LaMa when ComfyUI is not available); lama = halves put side by side, core rebuilt by LaMa")
+    ap.add_argument("--gutter", choices=["flatten", "none"], default="none",
+                    help="none (default) leaves the spine shadow as scanned for the human to erase; flatten divides the shadow band by its illumination")
+    ap.add_argument("--cut-margin", type=float, default=0.15, metavar="FRACTION",
+                    help="when a scan is cut into two pages, keep this fraction of the page width (0.15 = about 2.5 cm) "
+                         "of the neighbouring page past the detected cut, so the cut can be adjusted by hand; 0 = cut exactly")
     ap.add_argument("--only", nargs="*", help="stems to process")
     ap.add_argument("--rotate", type=int, choices=[0, 90, -90, 180], default=0, help="turn every scan first (degrees clockwise)")
     ap.add_argument("--also-images", action="store_true", help="also write images/<page>.png (fixed) and originals/<page>.png")
@@ -625,10 +595,12 @@ def main():
                 if len(plan["pages"]) == 2:
                     wg = []
                     for p in plan["pages"]:
-                        wp = warp_page(ana, p, (255, 255, 255))
+                        wp = warp_page(ana, p, (255, 255, 255), margin=False)
                         wp, _, _ = fix_gutter(wp, p, paper, "flatten")
                         wg.append(G.luminance(wp))
                     decide_spread(plan, wg, opts, stem)
+                    if plan["spread"]:
+                        drop_cut_margin(plan)
                 onames = output_names(plan, names, opts)
                 out_paths = [os.path.join(out, n + ".psd") for n in onames]
                 g = plan["gutter"]
@@ -664,10 +636,6 @@ def main():
                         build_image_psd(pth, o[0], o[1], work, i)
                         write_side_images(opts, pth, o[0], o[1])
                 review_sheet(ana, plan, results, os.path.join(out, "review", stem + ".jpg"), desc[:120])
-                if plan.get("seam"):
-                    rec["seam"] = plan["seam"]      # dy, gap, score, method of the spread join
-                    print(f"  spread joined ({plan['seam']['align']}): turn {plan['seam']['theta']} deg, dy {plan['seam']['dy']}, gap {plan['seam']['gap']}, "
-                          f"fold redrawn by {plan['seam'].get('method', 'none')}")
                 rec["seconds"] = round(time.time() - t0, 1)
                 report.write(json.dumps(rec, ensure_ascii=False, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o)) + "\n"); report.flush()
         except Exception as e:

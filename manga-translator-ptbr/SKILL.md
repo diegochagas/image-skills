@@ -1,6 +1,6 @@
 ---
 name: manga-translator-ptbr
-description: Turn comic/manga/art-book page scans into layered, letter-ready Photoshop PSDs or GIMP XCFs (native GIMP text layers), optionally translated to Brazilian Portuguese. Every mode writes a file with an "Original" raster layer, a "Copy" layer with the detected text erased (exact solid fill on plain backgrounds, LaMa AI inpainting over art), and one editable Photoshop paragraph text box per text block. Modes - (C) placeholder: folder of raw pages -> PSDs whose boxes hold "Lorem ipsum" in CCWildWords for a human letterer, fully automatic, no review; (B) translate: raw images of any size (including 5000-10000 px scans with tiny print, covers, colophons, catalogue inserts) -> detect every text block, merge Japanese vertical columns into paragraphs, the agent reviews the boxes and writes the PT-BR, boxes come out pre-filled with the translation; (A) fill the placeholder boxes of already-built PSDs from the English scanlation and/or the Japanese raw embedded in the PSD. Use when the user asks to clean/erase text off manga pages, prepare pages for lettering, "generate PSDs/XCFs with two layers and text boxes", wants GIMP files instead of Photoshop, translate images/PSDs to Portuguese, or add translated text boxes over detected text.
+description: Turn comic/manga/art-book page scans into layered, letter-ready Photoshop PSDs or GIMP XCFs (native GIMP text layers), optionally translated to Brazilian Portuguese. Every mode writes a file with an "Original" raster layer, a "Copy" layer with the detected text erased ONLY where the background is a single colour (exact solid fill; text over art is left for the human to erase by hand, no AI inpainting), and one editable Photoshop paragraph text box per text block. Modes - (C) placeholder: folder of raw pages -> PSDs whose boxes hold "Lorem ipsum" in CCWildWords for a human letterer, fully automatic, no review; (B) translate: raw images of any size (including 5000-10000 px scans with tiny print, covers, colophons, catalogue inserts) -> detect every text block, merge Japanese vertical columns into paragraphs, the agent reviews the boxes and writes the PT-BR, boxes come out pre-filled with the translation; (A) fill the placeholder boxes of already-built PSDs from the English scanlation and/or the Japanese raw embedded in the PSD. Use when the user asks to clean/erase text off manga pages, prepare pages for lettering, "generate PSDs/XCFs with two layers and text boxes", wants GIMP files instead of Photoshop, translate images/PSDs to Portuguese, or add translated text boxes over detected text.
 ---
 
 # Manga Translator (PT-BR) - and letter-ready PSD prep
@@ -32,7 +32,7 @@ raster layer with the cleaned/lettered art, and native Photoshop paragraph
 text layers positioned over each speech balloon, each pre-filled with
 placeholder Latin text.
 
-## Step 0 - double-page scans are split first
+## Step 0 - double-page scans (kept whole by default)
 
 When the source files are flatbed scans of an open book - two consecutive
 page numbers in one name (`082-083.jpg`, `030-31.psd`) or one wide image
@@ -72,18 +72,8 @@ before the first round:
    (`--spreads STEM ...` keeps those scans as ONE file named `016-017`; the
    file name of a spread is the two page numbers). Everything else is
    unchanged. Check `<OUT>/split/review/` for the spreads.
-   The two halves are not just put side by side: `split-scans/scripts/spread_seam.py`
-   aligns them - rotation, shift and missing width fitted to the straight
-   lines that cross the fold (pages scanned one at a time are often turned
-   ~0.4 deg against each other: 15 px from top to bottom); a spread with no
-   such lines is only shifted. The band next to the fold where the scan is
-   washed out or shaded (darks or lights off, up to ~150 px) gets the page's
-   tones back without being redrawn, and the local Qwen-Image-Edit takes the
-   fold itself away (the fold line plus at most 30 px of band each side), so
-   the spread reads as one picture. Each 768 px tile of the
-   fold is the best of up to 3 model runs (~2-10 min per spread). Look at the
-   middle of every spread at full size: where a line still breaks, rerun that
-   stem (`--force --only STEM`), or pass `--seam lama` for the old join.
+   The two halves are put side by side: no alignment and no fold removal
+   (removed on 2026-11-17); Diego does both by hand.
 3. Chinese/Japanese scans of manga read right-to-left: the first number is
    the RIGHT page - use `--rtl` (check a folio number on one scan).
 
@@ -164,9 +154,8 @@ below is written relative to `<repo>`. Python scripts run with
 need `<skill>/node_modules` (ag-psd, canvas, pngjs - `npm install` in
 `manga-translator-ptbr/`, done by `setup.sh`); the ONNX models are
 `<skill>/models/comictextdetector.pt.onnx` (text detector) and
-`<skill>/models/lama_fp32.onnx` (LaMa inpainting, optional - without it
-busy-background erases fall back to OpenCV Telea; with a local ComfyUI those
-regions go to Qwen-Image-Edit instead, see "Text over art"). The venv comes from
+`<skill>/models/lama_fp32.onnx` (used by other skills; this one no longer
+inpaints). The venv comes from
 `<repo>/setup.sh`, the rest from `<skill>/setup.sh` (which the root one runs).
 PSDs are written by ag-psd (no GIMP). XCF output needs GIMPhoto (flatpak GIMP 3)
 (`io.github.diegochagas.GIMPhoto`; `GIMP_CMD` env for another launcher).
@@ -239,7 +228,7 @@ context font (the log line says so; the letterer changes the font in GIMP).
   viewable as an image.
 - `replace_layer_pixels.mjs <psd> <layer index> <png> [--output]` — puts a
   PNG of the same size back into one raster layer (e.g. the Cleaned layer
-  after `inpaint_lama.py` erased a sign that is lettering in the art); every
+  was edited by hand); every
   other layer, text layers included, is written back unchanged.
 - `set_text_layers.mjs <psd> <edits.json> [--output <path>]` — writes new
   text into one or more text layers. `edits.json` is `{ "<layer index or
@@ -267,14 +256,14 @@ context font (the log line says so; the letterer changes the font in GIMP).
   PSD in a folder, rerun-safe; rasters and text stay byte-exact.
 - `spread_from_pages.py <split dir> <pages dir> <out dir>` — rebuilds divided
   spreads as one PSD (see "Spreads stay in one file").
-- `reclean_psd.py <psd> ... [--box x,y,w,h] [--spread LEFT RIGHT | --fold auto|X] [--above LAYER]`
-  — adds a newly cleaned layer to translated PSDs (see "Cleaning again a PSD
-  that is already translated").
+- `add_solid_layer.py <raw scan> <cleaned scan> <psd> ... (--in-place | --output-dir DIR) [--margin 0.15]`
+  — adds a layer "Solid text erased + cut margin" to finished PSDs (see
+  "Layer with only the solid-colour text erased").
+- `add_cut_layer.mjs <in.psd> <png> <out.psd> --name N --above LAYER --width W --shift-x N`
+  — like `add_raster_layer.mjs` but grows the canvas (strip kept past a cut).
 - `add_raster_layer.mjs <in.psd> <png> <out.psd> --name N --above LAYER [--smart-original NAME]`
   — inserts a PNG as a raster layer above a named one; `--smart-original`
   also turns a layer into a hidden Smart Object (`smart_object.mjs`).
-- `qwen_fill.py <image> <selection.png> <out.png> [erase|fold]` — one
-  Generative Fill on the local Qwen model, for trying a selection by hand.
 - `fit_text_boxes.mjs <psd|folder> [--from STEM] [--only ...] [--output DIR | --in-place] [--dry-run]`
   — grows every text box to show its whole text and moves boxes whose text
   covers another apart (see "Text boxes always show their whole text").
@@ -367,14 +356,14 @@ and one paragraph Type layer **Text N** per detected block, pre-filled with
 "Lorem ipsum ..." in CCWildWords-Regular (10-32 px, from the box height) so
 the letterer sees the lettering font and just selects-and-types. Erased
 regions are filled with the predominant surrounding colour (exact solid fill
-on plain white/black/grey/coloured backgrounds; LaMa inpainting over art).
+on plain white/black/grey/coloured backgrounds; text over art is NOT erased).
 Every page gets a PSD even with zero blocks (two identical rasters, no
 boxes), so a folder converts completely.
 
 **Restoration is manual by design** (user decision, 2026-08-26): if the
 erase damaged something the user wants back (a signature, an SFX crossed by
 the gate), they copy that area from the Original layer in Photoshop. Do NOT
-chase small imperfections - faint inpaint ghosts and the odd missed glyph are
+chase small imperfections - the odd missed glyph and text left over art are
 expected. There is no box-review step in this mode; if the user wants
 reviewed/merged boxes, that is Mode B with placeholder text (run
 `build_translated_psd.mjs ... --placeholder` on a merged/assembled blocks json).
@@ -398,8 +387,7 @@ Call it repeatedly until it prints `ALL DONE` (it stops starting new pages
 after `BUDGET` seconds so a shell call never hits the tool timeout; pages
 with a PSD are skipped). Per page it runs `detect_text.py` then
 `build_translated_psd.mjs --placeholder --copy-image` and writes a preview.
-A page with many SFX over art takes 1-3 min (LaMa, ~3-4 s per 512 px patch
-on 2 CPU cores); plain manga pages ~10-20 s.
+A page takes ~10-20 s.
 
 ### C2. Same thing, step by step (single pages, or when debugging)
 
@@ -409,9 +397,9 @@ on 2 CPU cores); plain manga pages ~10-20 s.
 
 Writes into `<out_dir>/detect/`: `<stem>_cleaned.png` (the future Copy
 layer), `<stem>_mask.png` (every touched pixel), `<stem>_overlay.jpg`
-(red = solid fill, green = inpainted, yellow = detected strokes outside any
-text block - left untouched) and `<stem>_detect.json` (`text_blocks`,
-erased components with method + sampled `bg_color`, `inpaint_method`).
+(red = solid fill, orange = text over art, left untouched, yellow = detected
+strokes outside any text block - left untouched) and `<stem>_detect.json` (`text_blocks`,
+text components with method (`fill`/`left`) + sampled `bg_color`).
 Unreadable images are `SKIP`ped, not fatal. Batch several pages per call;
 one 1024 px inference is ~1.4 s.
 
@@ -441,8 +429,8 @@ node manga-translator-ptbr/scripts/validate_psds.mjs <out_dir> --placeholder
 (Original + Copy present, one Text layer per detected block, none empty.)
 Report pages processed, output location, layer structure, and per page:
 text the model left (yellow in the overlay is usually protected art, but
-check for real text the gate skipped) and art areas that were inpainted
-(green) and may want manual restoration from Original.
+check for real text the gate skipped) and the text left over art (orange)
+that Diego erases by hand.
 
 Photoshop notes: the font is referenced by PostScript name only (no font
 data embedded) - a machine without CCWildWords-Regular substitutes a
@@ -709,52 +697,12 @@ block it unions the page-scale stroke segmentation with a crop-scale pass
 uniform background, fills every pixel that differs from the sampled
 background colour - which catches stylised titles the model misses. Each
 component is then filled with the sampled surrounding colour (exact solid
-fill - white/black/grey/red... backgrounds are never AI-touched), or, when
-the surroundings are busy (art, screentone, hatching), **AI-inpainted** -
-by the local Qwen-Image-Edit when ComfyUI is available (next section), else
-by LaMa (`manga-translator-ptbr/scripts/inpaint_lama.py`, model
-`manga-translator-ptbr/models/lama_fp32.onnx`, downloaded by `setup.sh`).
-Without either (or with `INPAINT=telea`) it falls back to `cv2.inpaint`. `<stem>_clean_overlay.jpg` tints what was touched (red = solid
-fill, green = inpainted) - check it before building. The detect json records
-`inpaint_method` (`lama`/`telea`/`qwen`).
-
-### Text over art: erased by the local Qwen-Image-Edit (GIMPhoto's process)
-
-Text that sits on a drawing (over a character, hatching, armor, a textured
-cover) is erased the way it is done by hand in GIMPhoto - select the text,
-Generative Fill, "erase text" - automated: `scripts/inpaint_qwen.py` turns
-every such text into a selection and runs GIMPhoto's own Generative Fill
-graph (`scripts/qwen_fill.py` + `scripts/gimphoto_comfyui_client.py`, copied
-from GIMPhoto) on the local **Qwen-Image-Edit** in ComfyUI. The model sees
-the drawing, repaints only inside the selection, and only those pixels
-replace the page. It is the default whenever the ComfyUI server and the
-model answer; nothing has to be set. Without them (or with `INPAINT=lama`)
-the same regions go to LaMa, as before.
-
-- **Checked and retried**: the text detector reads every result. Where it
-  still finds lettering (the model sometimes redraws the characters) the
-  region is run again with a new seed, up to 3 times, then handed to LaMa.
-  stderr says so; look at those regions first when reviewing.
-- **Flat screentone stays with LaMa**: regions on halftone dots with no line
-  structure (where the model leaves a flat grey patch and LaMa continues the
-  dots). `INPAINT_ROUTE=qwen` sends those to the model too.
-- Plain-colour fills (white balloons, black boxes) are never AI-touched. A
-  background only counts as plain when it is flat: a cloth cover, a printed
-  pattern or coarse tone (`detect_text.TEXTURE_P80`) is inpainted, because a
-  solid fill shows there as a flat patch.
-- Lettering the detector does not find (sound effects inside ink splashes)
-  is erased from a box given by hand: `inpaint_qwen.erase_boxes()`, exposed
-  as `reclean_psd.py --box`.
-- **Cost**: ~100 s per crop on an RTX 3050 6 GB (a page is one or two
-  crops; +100 s per retry) against ~10 s for LaMa. A page whose text is all
-  in balloons costs nothing extra. For a long book give the rounds a bigger
-  `BUDGET`, or pass `INPAINT=lama` for a fast first pass.
-- **Server**: `COMFYUI_URL` (default `http://127.0.0.1:8188`). When it does
-  not answer, the systemd `--user` unit `COMFYUI_SERVICE` (default
-  `comfyui`, the one local-ai-setup installs) is started and stopped again
-  when the script ends. Model files: the ones GIMPhoto's Generative Fill
-  uses (Qwen-Image-Edit, its text encoder, VAE and Lightning 4-step LoRA),
-  found by name on the server - not installed by `setup.sh`.
+fill - white/black/grey/red... backgrounds), or, when the surroundings are
+busy (art, screentone, hatching), **left untouched**: AI inpainting (Qwen /
+LaMa) was removed on 2026-11-17 because its results looked bad, so Diego
+erases text over art by hand from the Original layer.
+`<stem>_clean_overlay.jpg` tints what was touched (red = solid fill, orange =
+text over art, left) - check it before building.
 
 ### The Original layer is a hidden Smart Object
 
@@ -765,33 +713,25 @@ through the erased Copy. Scripts that read it (`verify_translated_psd.mjs`,
 `list_layers.mjs`, psd-sync) still see its pixels. `--no-smart-original`
 writes the old plain, visible layer.
 
-### Cleaning again a PSD that is already translated
+### Layer with only the solid-colour text erased
 
-`scripts/reclean_psd.py <psd> ...` erases the text of the page as scanned
-once more with the current process and adds the result as a new raster layer
-("Qwen clean") right above the layer edited so far - nothing else in the
-file changes, and the copy is written to `~/Downloads/<folder> recleaned/`.
-`--box x,y,w,h` adds text the detector misses (sound effects in ink
-splashes); `--spread "<left layer>" "<right layer>"` first joins a spread
-kept as two page layers with no visible fold (see "Spreads stay in one
-file"); `--fold auto` does the same for a spread that is ONE scan (both
-pages in the source layer): it is cut at its fold and joined again with no
-visible fold. Look at the new layer before telling Diego it is done.
+For PSDs that already exist (built with the old AI cleaning) the new
+process is added as one more layer, with the cut of double-page scans made
+wider than before:
 
-Run the whole folder in chunks: detect+clean is ~15-25 s/page on 2 cores and
-a shell call may be capped at ~3 min, so loop 5-8 pages per call with a
-"skip if the output already exists" guard.
+```bash
+<repo>/venv/bin/python manga-translator-ptbr/scripts/detect_blocks.py <work> <raw scan>
+<repo>/venv/bin/python manga-translator-ptbr/scripts/clean_blocks.py <work>/detect/<stem>_detect.json
+<repo>/venv/bin/python manga-translator-ptbr/scripts/add_solid_layer.py <raw scan> <work>/detect/<stem>_cleaned.png <psd> ... --in-place
+```
 
-**Verify the batch at the end**, not just per page:
-`node manga-translator-ptbr/scripts/validate_psds.mjs <out_dir>` asserts
-Original+Copy exist, the Text layer count matches `final/<stem>_blocks.json`
-(or `tr/<stem>.json`), no Type layer is empty and no "Lorem ipsum" is left.
-An empty box means a `texts` key was forgotten - and note that `verify_*` failing
-does *not* delete the PSD it just wrote, so a rerun guarded on "psd exists"
-will skip the broken page. Fix the json, then rebuild that page explicitly.
-
-Timings from the 117-page Shurato art book (2026-09-04): detect+merge+clean
-~45 min total, 1011 text boxes, PSDs ~40 MB each (4.9 GB for the book).
+`add_solid_layer.py` finds each PSD's bottom layer inside the raw scan, cuts
+the cleaned scan there PLUS 15 % of the page width (about 2.5 cm,
+`--margin`) of the neighbouring page on the side of the cut, adds it above
+"Qwen clean"/"Copy" as "Solid text erased + cut margin" and grows the canvas
+(layers of a page whose strip is on the left move right). A PSD holding the
+whole scan (a spread) gets the cleaned scan uncut. Back the PSDs up first
+(`--in-place`; running it twice adds the layer twice).
 
 ### Big-scan folder run (2026-09-05/06, 138-page 7008x10208 CLAMP Saint Seiya doujinshi)
 
@@ -802,23 +742,21 @@ capped at ~3 min and whose background processes are killed between calls:
   time-boxed, resumable rounds: call them repeatedly until they print
   `ALL DONE` (`FORMAT=xcf` on the build round for GIMP files). `run_build_round.sh` runs, per page, `ensure_upright.py`
   (recreates the EXIF-rotated PNG that was deleted to save disk) ->
-  `assemble_translation.py` -> `clean_blocks.py --budget N` (LaMa pass stops
-  at the deadline and saves `<stem>_pending_mask.png`; the next call resumes
-  only the leftover regions) -> `build_translated_psd.mjs` -> verify ->
+  `assemble_translation.py` -> `clean_blocks.py` -> `build_translated_psd.mjs` -> verify ->
   `preview_psd_text.py`, then copies the PSD to the output folder and marks
   `final/<stem>.ok`. Use `PAGES="stem1 stem2"` to redo specific pages.
 - `manga-translator-ptbr/scripts/page_views.py <stem>_merged.json <dir>` renders the page as 2
   strips at 1400 px with the block numbers and a ruler in OVERLAY units -
   legible enough to read handwritten doujinshi text and to measure `add` /
   `box` rectangles directly. This replaced zooming per block.
-- `clean_blocks.py` gained: `--budget`, a colour-cluster fallback (k-means on
+- `clean_blocks.py` gained: a colour-cluster fallback (k-means on
   the box when the model's stroke mask covers < 1 % or > 40 % of a non-plain
   box: white/coloured display titles over paintings and gradients), an
   either-polarity ink refinement (light text on dark art is kept), and the
   edge-touching-component rule for plain boxes (hatching/speed lines that
   run through a box are no longer wiped). `CLEAN_DEBUG=1` prints per-box
   coverage and writes `debug_mask.png`.
-- Timings on 2 CPU cores: detect ~35 s/page, clean 1.5-3 min/page (LaMa),
+- Timings on 2 CPU cores: detect ~35 s/page, clean ~5-60 s/page,
   build+verify ~20 s; PSDs 110-330 MB each (30 GB for the book). Mounted
   output folders may forbid deleting files: overwrite with `cp -f` instead.
 - Translation files with a merged index that is neither in `texts` nor in

@@ -4,7 +4,7 @@
 #   ensure_upright -> assemble_translation -> clean_blocks (LaMa, resumable)
 #   -> build_translated_psd -> verify -> preview -> cleanup of big PNGs
 # Re-run until it prints "ALL DONE". Each stage is skipped when its output
-# exists, and clean_blocks saves a pending mask when the budget runs out, so a
+# exists, and clean_blocks is quick, but a
 # page can span several shell calls.
 #
 #   OUT=<out dir with detect/ and tr/ - the one run_detect_round.sh used,
@@ -30,17 +30,15 @@ for stem in $stems; do
   blocks="$WORK/final/${stem}_blocks.json"
   det="$WORK/final/${stem}_detect.json"
   cleaned="$WORK/final/${stem}_cleaned.png"
-  pending="$WORK/final/${stem}_pending_mask.png"
   if [ ! -e "$blocks" ]; then
     python3 ./assemble_translation.py "$merged" "$OUT/tr/${stem}.json" "$blocks" || { echo "FAIL assemble $stem"; continue; }
     cp "$blocks" "$det"
   fi
   src=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('source_for_psd') or d['source'])" "$blocks")
   python3 ./ensure_upright.py "$blocks" 2>&1 | grep -v Warn || true
-  if [ ! -e "$cleaned" ] || [ -e "$pending" ]; then
+  if [ ! -e "$cleaned" ]; then
     b=$(( $(left) - 25 )); (( b < 30 )) && { echo "BUDGET reached (before clean $stem)"; exit 2; }
-    python3 ./clean_blocks.py "$det" --budget "$b" 2>&1 | grep -vE "Warn|setattr|return self"
-    [ -e "$pending" ] && { echo "PARTIAL $stem -> rerun"; exit 2; }
+    python3 ./clean_blocks.py "$det" 2>&1 | grep -vE "Warn|setattr|return self"
     [ -e "$cleaned" ] || { echo "FAIL clean $stem"; continue; }
   fi
   (( $(left) < 40 )) && { echo "BUDGET reached (before build $stem)"; exit 2; }
