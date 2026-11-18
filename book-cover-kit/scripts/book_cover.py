@@ -6,6 +6,8 @@ ISBN from the barcode. Works on one file or every image in a folder.
   palette <image|folder>  spine / text / accent colours as JSON
   barcode <photo|folder>  EAN-13 / ISBN found on the image as JSON
   all <photo|folder>      flatten + palette + barcode, one JSON record per image
+  shrink <image|folder>   no geometry: just resize to --max-side and re-save as JPEG
+                          (catalogue thumbnails of already-flat covers, e.g. Calibre's)
 
 Results go to --output (default ~/Downloads/<source name> covers, or
 $COMIC_OUTPUT_DIR instead of ~/Downloads); the input is never modified.
@@ -63,6 +65,11 @@ def shrink(img, max_side: int):
 def process(path: Path, command: str, output: Path, max_side: int) -> dict:
     img = load_image(path)
     record: dict = {"source": str(path)}
+    if command == "shrink":
+        small = shrink(img, max_side)
+        target = output / f"{path.stem}.jpg"
+        cv2.imwrite(str(target), small, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        record.update(cover=str(target), size=[small.shape[1], small.shape[0]])
     if command in ("flatten", "all"):
         flat, quad = flatten_cover(img)
         flat = shrink(flat, max_side)
@@ -77,9 +84,20 @@ def process(path: Path, command: str, output: Path, max_side: int) -> dict:
     return record
 
 
+def process_or_report(path: Path, command: str, output: Path, max_side: int, in_folder: bool) -> dict:
+    """In a folder, one unreadable image is reported in its record instead of stopping the batch."""
+    try:
+        return process(path, command, output, max_side)
+    except SystemExit as error:
+        if not in_folder:
+            raise
+        print(f"skipped: {error}", file=sys.stderr)
+        return {"source": str(path), "error": str(error)}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["flatten", "palette", "barcode", "all"])
+    parser.add_argument("command", choices=["flatten", "palette", "barcode", "all", "shrink"])
     parser.add_argument("source", type=Path)
     parser.add_argument("--output", type=Path, help="folder for covers + results.json")
     parser.add_argument("--max-side", type=int, default=1400, help="longest side of a saved cover (px)")
@@ -87,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     source = args.source.expanduser().resolve()
     output = (args.output or default_output(source)).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
-    records = [process(p, args.command, output, args.max_side) for p in list_images(source)]
+    records = [process_or_report(p, args.command, output, args.max_side, source.is_dir()) for p in list_images(source)]
     (output / "results.json").write_text(json.dumps(records, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps(records, indent=2, ensure_ascii=False))
     return 0

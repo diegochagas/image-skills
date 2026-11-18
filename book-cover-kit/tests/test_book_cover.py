@@ -60,5 +60,35 @@ class BookCoverKitTest(unittest.TestCase):
         self.assertIsNone(isbn_from_ean("7891234567895"))
 
 
+class ShrinkCommandTest(unittest.TestCase):
+    def test_shrink_resizes_without_touching_geometry(self) -> None:
+        import tempfile
+
+        from book_cover import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in"
+            src.mkdir()
+            cv2.imwrite(str(src / "a.png"), cv2.resize(synthetic_cover(), (1200, 1800)))
+            main(["shrink", str(src), "--output", str(Path(tmp) / "out"), "--max-side", "300"])
+            out = cv2.imread(str(Path(tmp) / "out" / "a.jpg"))
+            self.assertEqual(out.shape[:2], (300, 200))
+
+    def test_a_broken_image_in_a_folder_is_reported_not_fatal(self) -> None:
+        import json
+        import tempfile
+
+        from book_cover import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in"
+            src.mkdir()
+            cv2.imwrite(str(src / "good.png"), synthetic_cover())
+            (src / "broken.jpg").write_bytes(b"not an image")
+            main(["shrink", str(src), "--output", str(Path(tmp) / "out")])
+            records = json.loads((Path(tmp) / "out" / "results.json").read_text())
+            self.assertEqual(sorted("error" in r for r in records), [False, True])
+
+
 if __name__ == "__main__":
     unittest.main()
