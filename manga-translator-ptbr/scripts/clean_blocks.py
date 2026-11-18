@@ -6,15 +6,15 @@ Usage: python clean_blocks.py <detect_json> [<detect_json> ...] [--pad 6]
 
 For every <stem>_detect.json (from detect_blocks.py) writes, next to it:
   <stem>_cleaned.png   page with the strokes inside every text block erased
-  <stem>_clean_overlay.jpg   red = solid fill, green = inpainted
+  <stem>_clean_overlay.jpg   red = solid fill, orange = over art (left untouched)
 
 Per block the comic-text-detector is run on a crop of that block (letterboxed
 to 1024 px), so its stroke segmentation sees the text at block scale — big
 display titles that the page-scale pass blurs away are segmented cleanly.
 Each stroke component is then erased exactly like detect_text.py does: a
 solid fill with the sampled surrounding color when the ring around it is
-uniform, AI-inpainted with LaMa (see inpaint_lama.py; cv2.inpaint fallback)
-otherwise. Pixels outside the blocks are never touched.
+uniform, left untouched otherwise (no AI inpainting: Diego erases text over
+art by hand). Pixels outside the blocks are never touched.
 """
 import argparse
 import json
@@ -28,7 +28,6 @@ import onnxruntime as ort
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import detect_text as dt  # noqa: E402  (constants + MODEL path)
-import inpaint_lama  # noqa: E402  (LaMa "generative fill" for busy surroundings)
 
 CROP_PAD = 24      # context around the block given to the model
 LOW_COVERAGE = 0.01    # stroke-mask share of a box below which the colour-cluster fallback runs
@@ -93,27 +92,12 @@ def colour_cluster_text(reg, border_med, k=4):
     return out if out.any() else None
 
 
-def clean_page(sess, det_path, pad, deadline=None):
+def clean_page(sess, det_path, pad):
     d = json.load(open(det_path))
     src = d.get("source_for_psd") or d["source"]
     out_dir = os.path.dirname(det_path)
     stem = os.path.basename(det_path)[:-len("_detect.json")]
     cleaned_path = os.path.join(out_dir, f"{stem}_cleaned.png")
-    pending_path = os.path.join(out_dir, f"{stem}_pending_mask.png")
-    if os.path.exists(pending_path):
-        # resume: only the LaMa regions left over from a previous time-boxed run
-        cleaned = cv2.imread(cleaned_path)
-        pend = cv2.imread(pending_path, cv2.IMREAD_GRAYSCALE)
-        left = np.zeros_like(pend)
-        cleaned = inpaint_lama.inpaint(cleaned, pend, inplace=True, deadline=deadline, pending=left)
-        cv2.imwrite(cleaned_path, cleaned)
-        if left.any():
-            cv2.imwrite(pending_path, left)
-            print(f"{stem}: PARTIAL (resumed), {int((left > 0).sum())} mask px still pending -> rerun")
-        else:
-            os.remove(pending_path)
-            print(f"{stem}: {len(d['text_blocks'])} blocks, resumed inpainting finished -> {cleaned_path}")
-        return
     img = cv2.imread(src)
     if img is None:
         raise RuntimeError(f"cannot read {src}")
@@ -242,11 +226,11 @@ def clean_page(sess, det_path, pad, deadline=None):
         print(f"  mask px total {int((mask > 0).sum())}")
     n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     cleaned = img.copy()
-    inpaint_mask = np.zeros((H, W), np.uint8)
+    art_tint = np.zeros((H, W), np.uint8)
     fill_tint = np.zeros((H, W), np.uint8)
     k_in = np.ones((2 * dt.RING_IN + 1,) * 2, np.uint8)
     k_out = np.ones((2 * dt.RING_OUT + 1,) * 2, np.uint8)
-    nfill = ninp = 0
+    nfill = nleft = 0
     del page_mask
     for i in range(1, n):
         x, y, bw, bh, area = stats[i]
@@ -269,54 +253,35 @@ def clean_page(sess, det_path, pad, deadline=None):
             fill_tint[y0:y1, x0:x1][sel] = 255
             nfill += 1
         else:
-            inpaint_mask[y0:y1, x0:x1][sel] = 255
-            ninp += 1
+            art_tint[y0:y1, x0:x1][sel] = 255     # over art: left for the human
+            nleft += 1
     del labels
-    left = np.zeros_like(inpaint_mask)
-    if inpaint_mask.any():
-        # busy surroundings (art, screentone, gradients): LaMa inpainting when
-        # <skill>/models/lama_fp32.onnx exists, cv2.inpaint otherwise.  The solid
-        # fills above are never touched by this step.  With --budget the
-        # LaMa pass may stop early; the unprocessed regions are saved as
-        # <stem>_pending_mask.png and finished on the next run.
-        cleaned = inpaint_lama.inpaint(cleaned, inpaint_mask, inplace=True, deadline=deadline, pending=left)
-
+    # Strokes over busy surroundings (art, screentone, gradients) are NOT erased:
+    # the AI inpainting left visible patches, the human erases them by hand.
     cv2.imwrite(cleaned_path, cleaned)
-    if left.any():
-        cv2.imwrite(pending_path, left)
     overlay = img.copy()
-    for m, tint in ((fill_tint, (0, 0, 255)), (inpaint_mask, (0, 200, 0))):
+    for m, tint in ((fill_tint, (0, 0, 255)), (art_tint, (255, 160, 0))):
         if m.any():
             overlay[m > 0] = 0.25 * overlay[m > 0] + 0.75 * np.array(tint)
     cv2.imwrite(os.path.join(out_dir, f"{stem}_clean_overlay.jpg"), overlay,
                 [cv2.IMWRITE_JPEG_QUALITY, 85])
     d["cleaned"] = cleaned_path
-    d["inpaint_method"] = inpaint_lama.method_name()
     with open(det_path, "w") as f:
         json.dump(d, f, indent=1)
-    print(f"{stem}: {len(blocks)} blocks, {nfill} fill + {ninp} inpaint ({inpaint_lama.method_name()}) components -> {cleaned_path}"
-          + (f"  PARTIAL: {int((left > 0).sum())} mask px pending -> rerun" if left.any() else ""))
+    print(f"{stem}: {len(blocks)} blocks, {nfill} solid fills, {nleft} components over art left as is -> {cleaned_path}")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("detect_json", nargs="+")
     ap.add_argument("--pad", type=int, default=6, help="px around each block still erased")
-    ap.add_argument("--budget", type=float, default=None,
-                    help="seconds; stop the AI inpainting early once this much wall time has passed since "
-                         "start (the rest is saved as <stem>_pending_mask.png and finished by a rerun). "
-                         "Lets a 71 MP page be cleaned across several time-capped shell calls.")
     a = ap.parse_args()
     so = ort.SessionOptions()
     so.add_session_config_entry("session.set_denormal_as_zero", "1")
     sess = ort.InferenceSession(dt.MODEL, so, providers=["CPUExecutionProvider"])
-    deadline = time.time() + a.budget if a.budget else None
     for p in a.detect_json:
-        if deadline and time.time() > deadline:
-            print(f"BUDGET: not started {p}")
-            continue
         try:
-            clean_page(sess, p, a.pad, deadline)
+            clean_page(sess, p, a.pad)
         except Exception as e:
             print(f"SKIP {p}: {e}")
 

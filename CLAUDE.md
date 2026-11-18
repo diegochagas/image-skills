@@ -59,33 +59,26 @@ edit them.
   `-f`) writes XCFs from the same blocks JSON (`--placeholder` for mode C). The
   skill always runs its pipeline to the end and delivers PSDs; XCF only
   when the request explicitly asks for GIMP files.
-- Erasing text over art (`manga-translator-ptbr`'s `inpaint_lama.py`, used by
-  `detect_text.py`/`clean_blocks.py` and by `clean-texts --backend local`):
-  when the local ComfyUI and Qwen-Image-Edit answer, the regions go to
-  `inpaint_qwen.py` - GIMPhoto's Generative Fill process (select the text,
-  ask the model to erase it), run through `qwen_fill.py` on
-  `gimphoto_comfyui_client.py`, a copy of GIMPhoto's client that is never
-  edited here (copy it again to update). Each result is read by the text
-  detector and retried with a new seed; what the model cannot erase, and
-  flat screentone (`INPAINT_ROUTE=qwen` disables that routing), goes to
-  LaMa. `INPAINT=lama` / `telea` opt out. Qwen results differ per seed:
-  any new use of the model needs a measurable check and a retry, as
-  `inpaint_qwen._unfinished` and `spread_seam.fold_left` do.
+- Text over art is NOT erased (since 2026-11-17): `detect_text.py` /
+  `clean_blocks.py` fill only text on a single colour and leave the rest
+  (orange in the overlays) for Diego to erase by hand; the Qwen/LaMa
+  inpainting and the Qwen fold repair of spreads were judged unusable.
+  `inpaint_lama.py`, `inpaint_qwen.py`, `qwen_fill.py` stay only for
+  `clean-texts --backend local` and `generate-comic-page`.
 - "Original" is written as a hidden embedded Smart Object
   (`smart_object.mjs`, in `build_translated_psd.mjs`); readers still get its
-  pixels. `reclean_psd.py` adds a newly cleaned layer to finished PSDs
-  without touching their other layers.
+  pixels. `add_solid_layer.py` adds a layer with only the solid-colour text
+  erased, cut with a margin, to finished PSDs (growing their canvas).
 
 - `split-scans` is pure OpenCV geometry (`page_geometry.py`: paper mask from
   the scanner background colour, gutter valley per row band, envelope line
   fits of the paper edges, homography per page, illumination map of the
   shadow band) plus `psd_io.mjs` (ag-psd dump/build so every raster layer is
-  warped the same way and text layers travel with their page). The gutter
-  core reuses manga-translator-ptbr's `inpaint_lama.py`. A spread's halves are
-  joined by `spread_seam.py`: rotation, shift and missing width fitted to the
-  straight lines that cross the fold (`spread_align.py`; grey profiles, shift
-  only, when there are none), then the fold (gap + washed-out band) redrawn by the local
-  Qwen model, the alignment found once so every layer stays registered. Automatic spread
+  warped the same way and text layers travel with their page). The
+  spine is left as scanned (`--gutter none`), each cut page keeps `--cut-margin`
+  (0.15) of the neighbouring page. A spread's halves are
+  put side by side (no alignment, no fold removal: both by hand); two-page
+  scans are not split unless `--spread no` is passed. Automatic spread
   detection is deliberately conservative: a picture that spans two pages but
   keeps its inner margins is the agent's call (`--spread yes --only STEM`).
   Reading order is a flag (`--rtl` = first number on the right page), never

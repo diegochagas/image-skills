@@ -26,9 +26,8 @@ XCFs, with native GIMP text layers, by headless GIMPhoto (flatpak GIMP 3).
   hatching, screentone) stay untouched. Each erased region is filled with
   the predominant color around it: an exact sampled solid color when the
   surroundings are one plain color (white/black bubbles, grey caption boxes,
-  colored banners, ...), or AI-inpainted with LaMa (Photoshop-generative-fill
-  style) when the text sits over artwork. Inpainted areas are imperfect by
-  nature — restoration of anything worth keeping is manual, by copying from
+  colored banners, ...), (text over artwork is left as is: it is erased by hand, since 2026-11-17 there is no AI
+  inpainting). Restoration of anything worth keeping is manual, by copying from
   the Original layer.
 - **One native text layer per text block** (top), always big enough to show
   its whole text (a box grows, keeping its centre, until the lines fit at
@@ -51,29 +50,14 @@ The same panel through the three layers, bottom to top:
 | --------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------- |
 | ![Original scan with raw text](examples/066-original.jpg) | ![Text erased, bubbles blank](examples/066-cleaned.jpg) | ![Placeholder text in each box](examples/066-lettered.jpg) |
 
-### Text over art and double-page spreads (local Qwen-Image-Edit)
+### Text over art and double-page spreads
 
-Text drawn over the art (sound effects in ink splashes over a character,
-lettering on a textured cover) is erased the way it is done by hand in
-GIMPhoto: the text is selected and Generative Fill is asked to erase it,
-here automated with GIMPhoto's own graph on the local **Qwen-Image-Edit**
-in ComfyUI (free, offline). Each result is read by the text detector and
-redone with another seed when lettering is still there; LaMa is the
-fallback. White balloons keep their exact solid fill.
-
-| Scan: sound effects over the panels | Erased by the local Qwen-Image-Edit |
-| --- | --- |
-| ![Four panels with Chinese sound effects in ink splashes over the art](examples/056-sfx-scan.jpg) | ![The same panels with the sound effects erased and the hatching continued](examples/056-sfx-qwen.jpg) |
-| ![Saint Seiya spread with large Chinese lettering over a starfield and a character](examples/084-085-scan.jpg) | ![The same spread with the lettering erased, the starfield and armor continued, no fold in the middle](examples/084-085-qwen.jpg) |
-
-A double-page spread scanned as two pages is aligned, joined, and the fold
-in the middle (the line and the washed-out band next to it) is redrawn by the
-same model, so the spread reads as one picture; the text is then erased on
-the joined picture. The scan stays in the PSD as a hidden Smart Object.
-
-| Two scanned pages side by side | Joined: fold removed, text erased |
-| --- | --- |
-| ![Saint Seiya spread as two scanned pages with a fold in the middle and Chinese text](examples/056-057-scan.jpg) | ![The same spread as one picture with no fold and no text](examples/056-057-qwen.jpg) |
+Only text on a single colour is erased (white balloons, black boxes, flat
+banners). Text over art and the fold of a double-page spread are left for
+the human: the AI erasing (local Qwen-Image-Edit, LaMa) was removed on
+2026-11-17 because it did not work well. When a scan is cut into two pages
+each page keeps about 2.5 cm of the neighbouring page past the cut so the
+cut can be adjusted by hand.
 
 ## Three modes
 
@@ -100,9 +84,7 @@ here as the "no translation" path of the same toolchain.
    per-column / per-line boxes into paragraph-sized blocks.
 2. **Erase** — every stroke component inside a text block is solid-filled
    with the sampled surrounding colour when the ring around it is uniform,
-   or inpainted with LaMa (`inpaint_lama.py`, ONNX from
-   [Carve/LaMa-ONNX](https://huggingface.co/Carve/LaMa-ONNX); OpenCV Telea
-   fallback) otherwise. Mode B does this only inside the *final* reviewed
+   otherwise it is left untouched (no AI inpainting). Mode B does this only inside the *final* reviewed
    boxes (`clean_blocks.py`), resumable with a time budget.
 3. **Build the file** — `build_translated_psd.mjs` writes Original + Copy +
    one paragraph Type layer per block in a single pass (`--placeholder` for
