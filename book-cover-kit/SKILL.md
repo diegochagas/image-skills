@@ -15,6 +15,7 @@ description: Turn a phone photo of a book, comic, manga or magazine into what a 
 | `palette` | `{"spine": "#rrggbb", "text": "#111111"\|"#f7f3ea", "accent": "#rrggbb", "shares": [...]}` |
 | `barcode` | `[{"type": "EAN_13", "value": "978...", "isbn": "978..." or null}]` - `isbn` only for a 978/979 code with a valid check digit |
 | `all` | the three above in one record per image (palette computed on the flattened cover) |
+| `shrink` | `<stem>.jpg` resized to `--max-side`, nothing else (for covers that are already flat: Calibre, publisher images) |
 
 Every run also writes `results.json` in the output folder. Default output:
 `~/Downloads/<source name> covers/` (`$COMIC_OUTPUT_DIR` replaces
