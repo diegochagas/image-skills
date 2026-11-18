@@ -84,6 +84,17 @@ def process(path: Path, command: str, output: Path, max_side: int) -> dict:
     return record
 
 
+def process_or_report(path: Path, command: str, output: Path, max_side: int, in_folder: bool) -> dict:
+    """In a folder, one unreadable image is reported in its record instead of stopping the batch."""
+    try:
+        return process(path, command, output, max_side)
+    except SystemExit as error:
+        if not in_folder:
+            raise
+        print(f"skipped: {error}", file=sys.stderr)
+        return {"source": str(path), "error": str(error)}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=["flatten", "palette", "barcode", "all", "shrink"])
@@ -94,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     source = args.source.expanduser().resolve()
     output = (args.output or default_output(source)).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
-    records = [process(p, args.command, output, args.max_side) for p in list_images(source)]
+    records = [process_or_report(p, args.command, output, args.max_side, source.is_dir()) for p in list_images(source)]
     (output / "results.json").write_text(json.dumps(records, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps(records, indent=2, ensure_ascii=False))
     return 0
