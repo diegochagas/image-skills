@@ -7,6 +7,8 @@ Usage: python clean_blocks.py <detect_json> [<detect_json> ...] [--pad 6]
 For every <stem>_detect.json (from detect_blocks.py) writes, next to it:
   <stem>_cleaned.png   page with the strokes inside every text block erased
   <stem>_clean_overlay.jpg   red = solid fill, orange = over art (left untouched)
+  <stem>_art_text_mask.png   255 = the strokes over art that were left untouched
+  <stem>_fill_text_mask.png  255 = the strokes erased with a solid fill
 
 Per block the comic-text-detector is run on a crop of that block (letterboxed
 to 1024 px), so its stroke segmentation sees the text at block scale — big
@@ -259,6 +261,9 @@ def clean_page(sess, det_path, pad):
     # Strokes over busy surroundings (art, screentone, gradients) are NOT erased:
     # the AI inpainting left visible patches, the human erases them by hand.
     cv2.imwrite(cleaned_path, cleaned)
+    # the strokes left over art, for add_green_layer.py (the "green screen" layer)
+    cv2.imwrite(os.path.join(out_dir, f"{stem}_art_text_mask.png"), art_tint)
+    cv2.imwrite(os.path.join(out_dir, f"{stem}_fill_text_mask.png"), fill_tint)
     overlay = img.copy()
     for m, tint in ((fill_tint, (0, 0, 255)), (art_tint, (255, 160, 0))):
         if m.any():

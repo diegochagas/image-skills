@@ -280,6 +280,10 @@ context font (the log line says so; the letterer changes the font in GIMP).
 - `add_solid_layer.py <raw scan> <cleaned scan> <psd> ... (--in-place | --output-dir DIR) [--margin 0.15]`
   — adds a layer "Solid text erased + cut margin" to finished PSDs (see
   "Layer with only the solid-colour text erased").
+- `add_green_layer.py <psd> ... [--output-dir DIR] [--grow 3] [--no-gutter]`
+  — adds the chroma-green "Green screen" layer (see "Green screen layer").
+- `gutter_mask.py <image> ... [--out DIR]` — finds the middle seam of a
+  double-page scan + its shadow/defects (module used by `add_green_layer.py`).
 - `add_cut_layer.mjs <in.psd> <png> <out.psd> --name N --above LAYER --width W --shift-x N`
   — like `add_raster_layer.mjs` but grows the canvas (strip kept past a cut).
 - `add_raster_layer.mjs <in.psd> <png> <out.psd> --name N --above LAYER [--smart-original NAME]`
@@ -753,6 +757,34 @@ the cleaned scan there PLUS 15 % of the page width (about 2.5 cm,
 (layers of a page whose strip is on the left move right). A PSD holding the
 whole scan (a spread) gets the cleaned scan uncut. Back the PSDs up first
 (`--in-place`; running it twice adds the layer twice).
+
+### Green screen layer (text over art + middle of spreads)
+
+Text on a single colour is erased on Copy; text over art (a character,
+screentone, speed lines) is left for the human. To show the human exactly
+where that text is, finished PSDs get one more raster layer, **Green screen**
+(chroma green, RGB 0,177,64, transparent elsewhere), placed above the last
+raster layer and under the text boxes:
+
+```bash
+<repo>/venv/bin/python manga-translator-ptbr/scripts/add_green_layer.py <psd> ... [--output-dir DIR] [--grow 3] [--no-gutter]
+```
+
+- Text: `detect_blocks.py` + `clean_blocks.py` run on the PSD's Original;
+  `clean_blocks.py` now also writes `<stem>_art_text_mask.png` (strokes left
+  over art) and `<stem>_fill_text_mask.png` (strokes filled). A block keeps
+  its art strokes only when they are >= 50 % of its erased text (so the
+  outline of a black burst whose white letters were filled is not painted),
+  grown `--grow` px (3) so the lines around the letters are covered.
+- Double pages (name `NNN-MMM`, or wider than 1.15 x height): `gutter_mask.py`
+  finds the seam (a straight, slightly tilted step of paper tone present in
+  most of 20 height chunks; tilt search, screentone cancels in the chunk
+  averages), then adds the shadow next to it and a 1.2 % margin for
+  specks/fold defects. No seam found = no band (`gutter: {'found': False}`);
+  a weak seam (score ~0.5) can be a false positive: check the band.
+- Output goes to `~/Downloads/<source folder> green/` (inputs untouched).
+  Review the green layer by hiding the others; the tolerance knobs are the
+  constants at the top of the two scripts.
 
 ### Big-scan folder run (2026-09-05/06, 138-page 7008x10208 CLAMP Saint Seiya doujinshi)
 
