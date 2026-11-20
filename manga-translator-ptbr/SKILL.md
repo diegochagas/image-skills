@@ -284,11 +284,11 @@ context font (the log line says so; the letterer changes the font in GIMP).
   — adds the chroma-green "Green screen" layer (see "Green screen layer").
 - `gutter_mask.py <image> ... [--out DIR]` — finds the middle seam of a
   double-page scan + its shadow/defects (module used by `add_green_layer.py`).
-- `add_clean_layer.py <psd> ... (--in-place | --output-dir DIR) [--cost] [--min-credits 40]`
-  — adds the "AI clean" layer: text over art erased and the middle of
-  spreads repaired by Nano Banana Pro, straightened, with page-edge guides
-  (see "AI clean layer"). Modules: `text_ai.py` (one crop per text block),
-  `gutter_ai.py` (crops down the seam; also a CLI on one image),
+- `add_clean_layer.py <psd> ... (--in-place | --output-dir DIR) [--no-gutter] [--no-align]`
+  — adds the "Clean" layer: middle of spreads repaired (free, no AI),
+  straightened, with page-edge guides (see "Clean layer"). Modules:
+  `gutter_local.py` (seam fit, alignment, strip; also a CLI on one image),
+  `gutter_strip_fixes.py` (veil, dividing line, dead core, tones),
   `page_guides.py` (skew + page edges; CLI draws them).
 - `add_cut_layer.mjs <in.psd> <png> <out.psd> --name N --above LAYER --width W --shift-x N`
   — like `add_raster_layer.mjs` but grows the canvas (strip kept past a cut).
@@ -792,46 +792,45 @@ raster layer and under the text boxes:
   Review the green layer by hiding the others; the tolerance knobs are the
   constants at the top of the two scripts.
 
-### AI clean layer (text over art + middle of spreads, Higgsfield)
+### Clean layer (middle of spreads, straightened, guides — free)
 
-What the Green screen layer marks, this layer does: one more raster layer,
-**AI clean**, above every image layer and under the text boxes, built from
-the "Solid text erased + cut margin" layer (`--source`; the bottom layer
-when a PSD has none). Paid: Nano Banana Pro, 2 credits per generation.
+One more raster layer, **Clean**, above every image layer and under the
+text boxes, built from the "Solid text erased + cut margin" layer
+(`--source`; the bottom layer when a PSD has none). No AI, no credits.
 
 ```bash
-<repo>/venv/bin/python manga-translator-ptbr/scripts/add_clean_layer.py <psd> ... --cost      # count + price, nothing generated
-<repo>/venv/bin/python manga-translator-ptbr/scripts/add_clean_layer.py <psd> ... --in-place  # old files -> trash
+<repo>/venv/bin/python manga-translator-ptbr/scripts/add_clean_layer.py <psd> ... --in-place   # old files -> trash
 ```
 
-- Text over art (`text_ai.py`): blocks from `detect_blocks.py` count only
-  when the tiled detector found them >= 3 times (`<stem>_raw.json`; real
-  text 15-40 times, a false hit like a rock in screentone once) and they
-  reach into the Original (blocks only in the cut margin are skipped). Per
-  block a crop with 60 % context, at the closest model aspect ratio, long
-  side 2048 px; the answer is registered (affine ECC outside the block),
-  tone-matched on a ring around the letters and used ONLY on the letters
-  `clean_blocks.py` left over art (grown `--grow` 5 px). A whole-page erase
-  (clean-texts' gpt_image_2_5 low) was tried first: grey smudges, no
-  drawing under the letters - don't go back to it.
-- Middle of spreads (`gutter_ai.py`, `NNN-MMM` or landscape): overlapping
-  9:16 crops down the seam (`gutter_mask.find_seam`), 14 % of the width
-  wide (4 crops on a 3600x2550 spread = 8 credits); answers registered,
-  tone-matched, blended, used only inside the seam band (gutter_mask's band
-  widened 1 % of the width, for the blurred art next to it); a 1 px seam
-  trace the model keeps is blended away. The two halves are not shifted
-  against each other: the model redraws the lines so they meet. Raw crops
-  and answers stay in `~/Downloads/<folder> clean-layer-work/<stem>/`.
+- Middle of spreads (`NNN-MMM` or landscape; `gutter_local.py` +
+  `gutter_strip_fixes.py`, worked out by hand on one spread, distances
+  scaled by width / 1500): the dark dividing line is fitted; the vertical
+  offset between the halves is the median height difference of straight
+  lines that cross the band (LSD on both sides, extended to the seam, paired
+  by angle; >= 3 pairs) and the right half is moved by it (no horizontal
+  space added); per column the spine's flare/shadow is divided out
+  (references: untouched columns of the same page); the line itself is
+  undone as a gain/offset where paper and black anchors exist, and its few
+  dead columns are painted from both sides along the drawing's direction;
+  the black level and paper white get a straight ramp across the band.
+  Not done: blurred lines that cross the band are not redrawn, and small
+  strokes the line cut through come out soft - fix those by hand.
 - Straightening + guides (`page_guides.py`): the scan's tilt (length-weighted
-  median of its long straight lines, measured on the source BEFORE erasing -
-  erased text shifts it) rotates the layer (corners transparent); Photoshop
-  guides go on the page edges that run >= 60 % of the page (left/right in the
-  outer 30 % of the width, top/bottom in the outer 10 % of the height). A
-  side it is not sure of gets no guide and the run says `no guide: top, ...`:
-  those are placed by hand (a long panel border is not a page edge).
-- The balance is checked before every page; under `--min-credits` (40) the
-  run stops. QC per page: `<work>/<stem>/overlay.jpg` (red = letters
-  erased, blue = seam band), then the layer itself next to the source.
+  median of its long straight lines, measured on the source) rotates the
+  layer (corners transparent); Photoshop guides go on the page edges that
+  run >= 60 % of the page (left/right in the outer 30 % of the width,
+  top/bottom in the outer 10 % of the height). A side it is not sure of gets
+  no guide and the run says `no guide: top, ...`: place those by hand.
+- Text over art is NOT erased (Green screen marks it). A Higgsfield version
+  (Nano Banana Pro crops, 2 credits each) was tried on 2026-11-20 and
+  dropped for cost; 26 PSDs of that run carry its layer as "AI clean".
+- The spine is searched only within +-12 % of the width from the centre: the
+  wider search of gutter_mask picked panel borders on 3 of 20 spreads. No
+  spine there = no repair (the page is still straightened and guided).
+- QC: `~/Downloads/<folder> clean-layer-work/<stem>_gutter.jpg` (before |
+  after strip of each seam). A PSD that already has a "Clean" layer is
+  refused, so the same command resumes a stopped run; `--replace` rebuilds
+  that layer (`add_raster_layer.mjs --replace 1`).
 
 ### Big-scan folder run (2026-09-05/06, 138-page 7008x10208 CLAMP Saint Seiya doujinshi)
 
