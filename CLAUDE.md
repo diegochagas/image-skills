@@ -66,6 +66,11 @@ edit them.
   inpainting and the Qwen fold repair of spreads were judged unusable.
   `inpaint_lama.py`, `inpaint_qwen.py`, `qwen_fill.py` stay only for
   `clean-texts --backend local` and `generate-comic-page`.
+  Since 2026-11-20 `add_clean_layer.py` erases text over art and repairs
+  the middle of spreads with Higgsfield Nano Banana Pro (paid, 2 credits per
+  crop) into a separate "AI clean" layer, pixels changed only on the letters
+  / inside the seam band; it also straightens that layer and adds guides at
+  the page edges it is sure of.
 - "Original" is written as a hidden embedded Smart Object
   (`smart_object.mjs`, in `build_translated_psd.mjs`); readers still get its
   pixels. `add_solid_layer.py` adds a layer with only the solid-colour text
