@@ -18,7 +18,8 @@ Every other pixel is the source layer's. Pages with nothing to repair still get 
 
 Output: <DIR>/<psd name> (default ~/Downloads/<source folder> clean, or $COMIC_OUTPUT_DIR/...).
 --in-place: the PSD itself is replaced (the old file goes to the trash with `gio trash`). A PSD
-that already has a layer named --name is refused, so a rerun of the same list resumes.
+that already has a layer named --name is refused, so a rerun of the same list resumes;
+--replace rebuilds that layer instead.
 QC: <work>/<stem>_gutter.jpg (before | after strip of each repaired seam).
 
 Example: add_clean_layer.py ~/Downloads/Portuguese/*.psd --in-place
@@ -41,6 +42,8 @@ import gutter_local  # noqa: E402
 import gutter_mask  # noqa: E402
 import page_guides  # noqa: E402
 
+CENTRE_FRAC = 0.12          # the spine is looked for within +-12 % of the width from the centre
+
 
 def out_root() -> str:
     return os.environ.get("COMIC_OUTPUT_DIR") or os.path.expanduser("~/Downloads")
@@ -58,14 +61,24 @@ def guides_of(box: dict, src: dict) -> str:
     return ",".join(parts)
 
 
+def centre_seam(page: np.ndarray) -> tuple:
+    """gutter_mask's seam, searched only in the middle CENTRE_FRAC of the width: a spread's spine is
+    near its centre, and a wider search picks panel borders (164-165, 206-207, 232-233). None if absent."""
+    w = page.shape[1]
+    x0 = int(w * (0.5 - CENTRE_FRAC))
+    gray = cv2.cvtColor(page[:, x0:w - x0], cv2.COLOR_BGR2GRAY)
+    seam = gutter_mask.find_seam(gray)
+    return None if seam is None else (seam[0] + x0, seam[1], seam[2])
+
+
 def repair(page: np.ndarray, stem: str, src: dict, work: str, a: argparse.Namespace) -> tuple:
     """(page with the seam repaired, info or None) - only for a double page whose seam shows."""
     if a.no_gutter or not green.is_double(stem, src["width"], src["height"]):
         return page, None
-    _, found = gutter_mask.gutter_mask(page)
-    if not found["found"]:
+    seam = centre_seam(page)
+    if seam is None:
         return page, {"seam": "not found"}
-    out, info = gutter_local.repair_gutter(page, (float(found["x"]), float(found["tilt"]), float(found["score"])))
+    out, info = gutter_local.repair_gutter(page, seam)
     x, r = int(info["x_mid"]), int(60 * page.shape[1] / gutter_local.REF_W)
     strip = np.hstack([page[:, x - r:x + r], np.full((page.shape[0], 6, 3), 255, np.uint8), out[:, x - r:x + r]])
     cv2.imwrite(os.path.join(work, f"{stem}_gutter.jpg"), strip, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -90,11 +103,12 @@ def build_layer(psd: str, tmp: str, work: str, a: argparse.Namespace) -> tuple:
                            guides=guides_of(box, src), gutter=gutter)
 
 
-def write_psd(psd: str, layer_png: str, rep: dict, dest: str, name: str) -> None:
-    above = green.layer_below_text(rep["layers"])
+def write_psd(psd: str, layer_png: str, rep: dict, dest: str, name: str, replace: bool) -> None:
+    layers = [l for l in rep["layers"] if not (replace and l["name"] == name)]
+    above = green.layer_below_text(layers)
     green.run(["node", "--max-old-space-size=6144", os.path.join(HERE, "add_raster_layer.mjs"), psd, layer_png, dest,
                "--name", name, "--above", above, "--left", str(rep["src"]["left"]), "--top", str(rep["src"]["top"])]
-              + (["--guides", rep["guides"]] if rep["guides"] else []))
+              + (["--guides", rep["guides"]] if rep["guides"] else []) + (["--replace", "1"] if replace else []))
 
 
 def place(psd: str, tmp_out: str, a: argparse.Namespace, out_dir: str) -> str:
@@ -110,12 +124,12 @@ def place(psd: str, tmp_out: str, a: argparse.Namespace, out_dir: str) -> str:
 
 def process(psd: str, out_dir: str, work: str, a: argparse.Namespace) -> dict:
     stem = Path(psd).stem
-    if any(l["name"] == a.name for l in green.layers_of(psd)):
-        raise RuntimeError(f'{stem} already has a layer named "{a.name}"')
+    if not a.replace and any(l["name"] == a.name for l in green.layers_of(psd)):
+        raise RuntimeError(f'{stem} already has a layer named "{a.name}" (--replace rebuilds it)')
     with tempfile.TemporaryDirectory(prefix="clean_layer_") as tmp:
         layer_png, rep = build_layer(psd, tmp, work, a)
         tmp_out = os.path.join(os.path.dirname(os.path.abspath(psd)) if a.in_place else out_dir, f".{stem}.clean.psd")
-        write_psd(psd, layer_png, rep, tmp_out, a.name)
+        write_psd(psd, layer_png, rep, tmp_out, a.name, a.replace)
         rep["dest"] = place(psd, tmp_out, a, out_dir)
     return rep
 
@@ -134,6 +148,7 @@ def main() -> int:
     ap.add_argument("--in-place", action="store_true", help="replace the PSDs (old files go to the trash)")
     ap.add_argument("--name", default="Clean")
     ap.add_argument("--no-gutter", action="store_true")
+    ap.add_argument("--replace", action="store_true", help="rebuild a layer named --name that the PSD already has")
     ap.add_argument("--no-align", action="store_true", help="do not straighten the layer")
     ap.add_argument("--source", default="Solid text erased + cut margin",
                     help="layer the cleaning starts from (falls back to the bottom layer)")

@@ -824,9 +824,13 @@ text boxes, built from the "Solid text erased + cut margin" layer
 - Text over art is NOT erased (Green screen marks it). A Higgsfield version
   (Nano Banana Pro crops, 2 credits each) was tried on 2026-11-20 and
   dropped for cost; 26 PSDs of that run carry its layer as "AI clean".
+- The spine is searched only within +-12 % of the width from the centre: the
+  wider search of gutter_mask picked panel borders on 3 of 20 spreads. No
+  spine there = no repair (the page is still straightened and guided).
 - QC: `~/Downloads/<folder> clean-layer-work/<stem>_gutter.jpg` (before |
   after strip of each seam). A PSD that already has a "Clean" layer is
-  refused, so the same command resumes a stopped run.
+  refused, so the same command resumes a stopped run; `--replace` rebuilds
+  that layer (`add_raster_layer.mjs --replace 1`).
 
 ### Big-scan folder run (2026-09-05/06, 138-page 7008x10208 CLAMP Saint Seiya doujinshi)
 

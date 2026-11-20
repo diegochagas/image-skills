@@ -3,7 +3,7 @@
 // Everything else in the file (text layers, adjustment layers, the other
 // rasters) is written back as read.
 //
-// Usage: node add_raster_layer.mjs <in.psd> <layer.png> <out.psd> --name "Qwen clean" [--guides v:X,h:Y,...]
+// Usage: node add_raster_layer.mjs <in.psd> <layer.png> <out.psd> --name "Qwen clean" [--guides v:X,h:Y,...] [--replace 1]
 //             --above "Copy" [--left 0] [--top 0] [--smart-original NAME ...]
 // --smart-original NAME: also turn that layer into a hidden Smart Object
 //   (the scan it holds stays in the file, out of the way).
@@ -29,6 +29,8 @@ if (!outPath || !opts.above) {
 }
 
 const psd = readPsd(fs.readFileSync(inPath), { useImageData: true, skipCompositeImageData: true, skipThumbnail: true });
+// --replace 1: a top-level layer already named --name is removed first (rebuilding a generated layer)
+if (opts.replace) psd.children = psd.children.filter((l) => l.name !== (opts.name || 'Qwen clean'));
 const at = psd.children.findIndex((l) => l.name === opts.above);
 if (at === -1) {
   console.error(`no top-level layer named "${opts.above}" in ${inPath} (has: ${psd.children.map((l) => l.name).join(', ')})`);

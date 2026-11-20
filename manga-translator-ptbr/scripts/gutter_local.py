@@ -72,6 +72,8 @@ def fit_seam(gray: np.ndarray, seam: Seam, s: float) -> Line:
     ys, xs = np.array(ys, float), np.array(xs, float)
     keep = np.ones(len(ys), bool)
     for _ in range(4):
+        if keep.sum() < 10:
+            return base
         p = np.polyfit(ys[keep], xs[keep], 1)
         keep = np.abs(xs - np.polyval(p, ys)) < 2.5 * s
     if keep.mean() < 0.5:
