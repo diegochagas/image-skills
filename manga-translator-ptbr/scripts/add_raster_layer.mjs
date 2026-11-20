@@ -3,7 +3,7 @@
 // Everything else in the file (text layers, adjustment layers, the other
 // rasters) is written back as read.
 //
-// Usage: node add_raster_layer.mjs <in.psd> <layer.png> <out.psd> --name "Qwen clean"
+// Usage: node add_raster_layer.mjs <in.psd> <layer.png> <out.psd> --name "Qwen clean" [--guides v:X,h:Y,...]
 //             --above "Copy" [--left 0] [--top 0] [--smart-original NAME ...]
 // --smart-original NAME: also turn that layer into a hidden Smart Object
 //   (the scan it holds stays in the file, out of the way).
@@ -44,6 +44,16 @@ psd.children.splice(at + 1, 0, {
   name: opts.name || 'Qwen clean', left, top, right: left + img.width, bottom: top + img.height,
   imageData: { data: new Uint8Array(d.data.buffer, d.data.byteOffset, d.data.byteLength), width: img.width, height: img.height },
 });
+// --guides "v:113,v:689,h:28,h:880": Photoshop guides (document px) added to the file's own
+if (opts.guides) {
+  psd.imageResources = psd.imageResources || {};
+  const gg = psd.imageResources.gridAndGuidesInformation || {};
+  gg.guides = (gg.guides || []).concat(opts.guides.split(',').map((g) => {
+    const [dir, loc] = g.split(':');
+    return { direction: dir === 'h' ? 'horizontal' : 'vertical', location: Number(loc) };
+  }));
+  psd.imageResources.gridAndGuidesInformation = gg;
+}
 for (const name of opts.smart) {
   const layer = psd.children.find((l) => l.name === name);
   if (!layer) { console.error(`--smart-original: no layer named "${name}"`); process.exit(1); }
